@@ -10,6 +10,7 @@ const NAV = [
   { id: 'workers',   label: '👷 Workers'   },
   { id: 'kyc',       label: '🛡️ KYC Review' },
   { id: 'commissions', label: '💸 Commissions' },
+  { id: 'welfare',   label: '🏛️ Welfare Fee' },
   { id: 'disputes',  label: '⚠️ Disputes'  },
   { id: 'payouts',   label: '💰 Payouts'   },
   { id: 'pricing',   label: '🏷️ Pricing'   },
@@ -309,13 +310,13 @@ function KYCReview() {
 
   return (
     <div>
-      <h2 style={{ fontSize:18, fontWeight:700, marginBottom:16 }}>KYC Review — {rows.length} pending</h2>
+      <h2 style={{ fontSize:18, fontWeight:700, marginBottom:16 }}>ID Verification — {rows.length} pending</h2>
       {sel && (
         <Card style={{ marginBottom:16 }}>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
             <div>
               <p style={{ fontWeight:800, fontSize:16 }}>{sel.name}</p>
-              <p style={{ fontSize:12, color:'#666' }}>{sel.skill} · {sel.city} · {sel.phone}</p>
+              <p style={{ fontSize:12, color:'#666' }}>{sel.skill} · {sel.city} · {sel.phone} · ID: {sel.id_doc_type || 'aadhaar'}</p>
             </div>
             <button onClick={() => { setSel(null); setImgs(null) }} style={{ background:'#222', border:'none', borderRadius:8, color:'#888', padding:'6px 12px', cursor:'pointer' }}>Close</button>
           </div>
@@ -325,7 +326,7 @@ function KYCReview() {
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:14 }}>
               {[['Front', imgs.front],['Back', imgs.back]].map(([lb,u]) => (
                 <div key={lb}>
-                  <p style={{ fontSize:12, color:'#666', marginBottom:6 }}>Aadhaar {lb}</p>
+                  <p style={{ fontSize:12, color:'#666', marginBottom:6 }}>ID {lb}</p>
                   {u ? <img src={u} alt={lb} style={{ width:'100%', borderRadius:10, border:'1px solid #2a2a2a' }} /> : <p style={{ color:'#555' }}>Missing</p>}
                 </div>
               ))}
@@ -405,7 +406,61 @@ function Commissions() {
   )
 }
 
-const SCREENS = { overview: Overview, bookings: Bookings, workers: Workers, kyc: KYCReview, commissions: Commissions, disputes: Disputes, payouts: Payouts, pricing: Pricing }
+function WelfareFee() {
+  // Karnataka Platform-Based Gig Workers Act 2025: 1% of payout, capped ₹1.50/transaction
+  // (professional services), self-declared quarterly to the Welfare Board.
+  const RATE = 0.01, CAP = 1.5
+  const [rows, setRows] = useState(null)
+  useEffect(() => {
+    sb.from('bookings').select('amount, payment_confirmed_at')
+      .eq('status','completed').eq('payment_status','paid').not('payment_confirmed_at','is',null)
+      .then(({ data }) => setRows(data || []))
+  }, [])
+  if (!rows) return <p style={{ color:'#555' }}>Loading…</p>
+  const fee = a => Math.min((a||0)*RATE, CAP)
+  const byQuarter = {}
+  rows.forEach(b => {
+    const d = new Date(b.payment_confirmed_at)
+    const q = d.getFullYear()+' Q'+(Math.floor(d.getMonth()/3)+1)
+    byQuarter[q] = byQuarter[q] || { jobs:0, payout:0, fee:0 }
+    byQuarter[q].jobs++; byQuarter[q].payout += (b.amount||0); byQuarter[q].fee += fee(b.amount)
+  })
+  const quarters = Object.entries(byQuarter).sort((a,b) => b[0].localeCompare(a[0]))
+  function downloadCSV() {
+    const lines = ['Quarter,Completed Jobs,Total Payout (INR),Welfare Fee Due (INR)']
+    quarters.forEach(([q,v]) => lines.push(`${q},${v.jobs},${v.payout},${v.fee.toFixed(2)}`))
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(new Blob([lines.join('\n')], { type:'text/csv' }))
+    a.download = 'kaam-ready-welfare-fee.csv'
+    a.click()
+  }
+  return (
+    <div>
+      <h2 style={{ fontSize:18, fontWeight:700, marginBottom:6 }}>Gig Workers' Welfare Fee</h2>
+      <p style={{ fontSize:13, color:'#666', marginBottom:16 }}>
+        Karnataka Platform-Based Gig Workers Act, 2025 — 1% of each worker payout (capped at ₹1.50/transaction for professional services), paid quarterly to the Welfare Board. Figures below are auto-calculated from confirmed UPI payments; verify rates on the Labour Department site before filing.
+      </p>
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))', gap:12, marginBottom:16 }}>
+        <StatCard label="All-time fee accrued" value={'₹'+quarters.reduce((s,[,v])=>s+v.fee,0).toFixed(2)} />
+        <StatCard label="Completed paid jobs" value={rows.length} />
+      </div>
+      <Card style={{ padding:0, marginBottom:14 }}>
+        <Table loading={false} rows={quarters.map(([q,v])=>({ q, ...v }))} cols={[
+          { key:'q',      label:'Quarter' },
+          { key:'jobs',   label:'Completed Jobs' },
+          { key:'payout', label:'Total Payout', render: r => '₹'+r.payout.toLocaleString('en-IN') },
+          { key:'fee',    label:'Fee Due',      render: r => <b style={{ color:Y }}>₹{r.fee.toFixed(2)}</b> },
+        ]} />
+      </Card>
+      <button onClick={downloadCSV}
+        style={{ background:Y, border:'none', borderRadius:10, padding:'10px 18px', fontWeight:800, cursor:'pointer', fontSize:13 }}>
+        ⬇ Download CSV for filing
+      </button>
+    </div>
+  )
+}
+
+const SCREENS = { overview: Overview, bookings: Bookings, workers: Workers, kyc: KYCReview, commissions: Commissions, welfare: WelfareFee, disputes: Disputes, payouts: Payouts, pricing: Pricing }
 
 // ── Login ─────────────────────────────────────────────────────────────────────
 const ADMIN_EMAIL = 'admin@kaamready.in'
