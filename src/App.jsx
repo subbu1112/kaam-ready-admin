@@ -94,7 +94,7 @@ function Overview() {
       const rev = bookings.filter(x => x.status === 'completed').reduce((s, x) => s + (x.amount || 0), 0)
       setStats({
         totalBookings: bookings.length,
-        activeBookings: bookings.filter(x => ['pending','accepted','arrived'].includes(x.status)).length,
+        activeBookings: bookings.filter(x => ['searching','assigned','priced','scheduled'].includes(x.status)).length,
         completedBookings: bookings.filter(x => x.status === 'completed').length,
         revenue: rev,
         totalWorkers: workers.length,
@@ -192,10 +192,18 @@ function Workers() {
 function Disputes() {
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
-  useEffect(() => {
+  const load = useCallback(() => {
     sb.from('disputes').select('*').order('created_at', { ascending: false })
       .then(({ data }) => { setRows(data || []); setLoading(false) })
   }, [])
+  useEffect(() => { load() }, [load])
+  async function resolve(r) {
+    const resolution = prompt('Resolution note (what was done):', r.resolution || '')
+    if (resolution === null) return
+    const { error } = await sb.from('disputes').update({ status:'resolved', resolution, resolved_at:new Date().toISOString() }).eq('id', r.id)
+    if (error) { alert('Failed: '+error.message); return }
+    load()
+  }
   return (
     <div>
       <h2 style={{ fontSize:18, fontWeight:700, marginBottom:16 }}>Disputes</h2>
@@ -206,6 +214,9 @@ function Disputes() {
           { key:'reason',        label:'Reason',     wrap: true },
           { key:'status',        label:'Status',     render: r => <Badge status={r.status} /> },
           { key:'resolution',    label:'Resolution', wrap: true },
+          { key:'_act', label:'', render: r => r.status!=='resolved' && (
+            <button onClick={() => resolve(r)} style={{ background:'#16a34a', color:'#fff', border:'none', borderRadius:8, padding:'6px 12px', fontWeight:700, cursor:'pointer', fontSize:12 }}>Resolve</button>
+          )},
         ]} />
       </Card>
     </div>
