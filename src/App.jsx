@@ -8,6 +8,8 @@ const NAV = [
   { id: 'overview',  label: '📊 Overview'  },
   { id: 'bookings',  label: '📋 Bookings'  },
   { id: 'workers',   label: '👷 Workers'   },
+  { id: 'kyc',       label: '🛡️ KYC Review' },
+  { id: 'commissions', label: '💸 Commissions' },
   { id: 'disputes',  label: '⚠️ Disputes'  },
   { id: 'payouts',   label: '💰 Payouts'   },
   { id: 'pricing',   label: '🏷️ Pricing'   },
@@ -16,6 +18,10 @@ const NAV = [
 function Badge({ status }) {
   const map = {
     pending:   ['#2a1a00','#F5C000'],
+    searching: ['#2a1a00','#F5C000'],
+    assigned:  ['#0a1a2a','#60a5fa'],
+    priced:    ['#241a00','#fbbf24'],
+    claimed:   ['#0a1a2a','#60a5fa'],
     accepted:  ['#0a2a1a','#34d399'],
     arrived:   ['#0a1a2a','#60a5fa'],
     completed: ['#0a2a0a','#4ade80'],
@@ -124,7 +130,7 @@ function Bookings() {
       .then(({ data }) => { setRows(data || []); setLoading(false) })
   }, [])
   const filtered = filter === 'all' ? rows : rows.filter(r => r.status === filter)
-  const statuses = ['all','pending','accepted','arrived','completed','cancelled']
+  const statuses = ['all','searching','assigned','priced','completed','cancelled']
   return (
     <div>
       <h2 style={{ fontSize:18, fontWeight:700, marginBottom:16 }}>Bookings</h2>
@@ -144,6 +150,7 @@ function Bookings() {
           { key:'city',       label:'City'     },
           { key:'status',     label:'Status',  render: r => <Badge status={r.status} /> },
           { key:'amount',     label:'Amount',  render: r => r.amount ? `₹${r.amount}` : '—' },
+          { key:'payment_status', label:'Payment', render: r => r.payment_status ? <Badge status={r.payment_status} /> : '—' },
           { key:'address',    label:'Address', wrap: true },
         ]} />
       </Card>
@@ -170,6 +177,9 @@ function Workers() {
           { key:'rating',         label:'Rating',   render: r => r.rating ? `⭐ ${r.rating}` : '—' },
           { key:'total_jobs',     label:'Jobs'      },
           { key:'wallet_balance', label:'Wallet',   render: r => `₹${r.wallet_balance || 0}` },
+          { key:'commission_due', label:'Comm. Due', render: r => `₹${r.commission_due || 0}` },
+          { key:'upi_id',         label:'UPI',      render: r => r.upi_id || '—' },
+          { key:'price_max',      label:'Max ₹',    render: r => r.price_max ? `₹${r.price_max}` : '—' },
           { key:'is_online',      label:'Online',   render: r => r.is_online ? '🟢' : '🔴' },
           { key:'aadhaar_verified', label:'KYC',    render: r => r.aadhaar_verified ? '✅' : '❌' },
           { key:'onboarding_done',  label:'Onboarded', render: r => r.onboarding_done ? '✅' : '❌' },
@@ -249,15 +259,156 @@ function Pricing() {
   )
 }
 
-const SCREENS = { overview: Overview, bookings: Bookings, workers: Workers, disputes: Disputes, payouts: Payouts, pricing: Pricing }
+function KYCReview() {
+  const [rows, setRows] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [sel, setSel] = useState(null)        // worker being reviewed
+  const [imgs, setImgs] = useState(null)      // { front, back } signed URLs
+  const [busy, setBusy] = useState(false)
+
+  const load = useCallback(() => {
+    setLoading(true)
+    sb.from('workers').select('*').eq('aadhar_submitted', true).eq('aadhar_verified', false)
+      .order('created_at', { ascending: true })
+      .then(({ data }) => { setRows(data || []); setLoading(false) })
+  }, [])
+  useEffect(() => { load() }, [load])
+
+  async function open(w) {
+    setSel(w); setImgs(null)
+    const [f, b] = await Promise.all([
+      sb.storage.from('kyc').createSignedUrl(`${w.id}/aadhaar-front.jpg`, 600),
+      sb.storage.from('kyc').createSignedUrl(`${w.id}/aadhaar-back.jpg`, 600),
+    ])
+    setImgs({ front: f.data?.signedUrl, back: b.data?.signedUrl,
+      err: f.error?.message || b.error?.message })
+  }
+
+  async function decide(approve) {
+    if (!sel || busy) return
+    setBusy(true)
+    const patch = approve
+      ? { aadhar_verified: true, aadhaar_verified: true, trust_score: Math.max(sel.trust_score||60, 80) }
+      : { aadhar_submitted: false }   // rejected → worker must re-upload
+    const { error } = await sb.from('workers').update(patch).eq('id', sel.id)
+    setBusy(false)
+    if (error) { alert('Failed: '+error.message+' (are you signed in as admin?)'); return }
+    setSel(null); setImgs(null); load()
+  }
+
+  return (
+    <div>
+      <h2 style={{ fontSize:18, fontWeight:700, marginBottom:16 }}>KYC Review — {rows.length} pending</h2>
+      {sel && (
+        <Card style={{ marginBottom:16 }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
+            <div>
+              <p style={{ fontWeight:800, fontSize:16 }}>{sel.name}</p>
+              <p style={{ fontSize:12, color:'#666' }}>{sel.skill} · {sel.city} · {sel.phone}</p>
+            </div>
+            <button onClick={() => { setSel(null); setImgs(null) }} style={{ background:'#222', border:'none', borderRadius:8, color:'#888', padding:'6px 12px', cursor:'pointer' }}>Close</button>
+          </div>
+          {!imgs ? <p style={{ color:'#555' }}>Loading documents…</p> : imgs.err ? (
+            <p style={{ color:'#f87171', fontSize:13 }}>Could not load documents: {imgs.err}. Sign in as admin@kaamready.in to view KYC files.</p>
+          ) : (
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:14 }}>
+              {[['Front', imgs.front],['Back', imgs.back]].map(([lb,u]) => (
+                <div key={lb}>
+                  <p style={{ fontSize:12, color:'#666', marginBottom:6 }}>Aadhaar {lb}</p>
+                  {u ? <img src={u} alt={lb} style={{ width:'100%', borderRadius:10, border:'1px solid #2a2a2a' }} /> : <p style={{ color:'#555' }}>Missing</p>}
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={{ display:'flex', gap:10 }}>
+            <button onClick={() => decide(true)} disabled={busy}
+              style={{ flex:1, background:'#16a34a', color:'#fff', border:'none', borderRadius:10, padding:12, fontWeight:700, cursor:'pointer', opacity:busy?.6:1 }}>✓ Approve</button>
+            <button onClick={() => decide(false)} disabled={busy}
+              style={{ flex:1, background:'#dc2626', color:'#fff', border:'none', borderRadius:10, padding:12, fontWeight:700, cursor:'pointer', opacity:busy?.6:1 }}>✕ Reject (re-upload)</button>
+          </div>
+        </Card>
+      )}
+      <Card style={{ padding:0 }}>
+        <Table loading={loading} rows={rows} cols={[
+          { key:'name',  label:'Name'  },
+          { key:'phone', label:'Phone' },
+          { key:'city',  label:'City'  },
+          { key:'skill', label:'Skill' },
+          { key:'created_at', label:'Submitted', render: r => fmt(r.created_at) },
+          { key:'_act', label:'', render: r => (
+            <button onClick={() => open(r)} style={{ background:Y, border:'none', borderRadius:8, padding:'6px 14px', fontWeight:700, cursor:'pointer', fontSize:12 }}>Review</button>
+          )},
+        ]} />
+      </Card>
+    </div>
+  )
+}
+
+function Commissions() {
+  const [rows, setRows] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(null)
+  const load = useCallback(() => {
+    setLoading(true)
+    sb.from('workers').select('id,name,phone,city,upi_id,commission_due,wallet_balance,total_jobs')
+      .gt('commission_due', 0).order('commission_due', { ascending: false })
+      .then(({ data }) => { setRows(data || []); setLoading(false) })
+  }, [])
+  useEffect(() => { load() }, [load])
+  const total = rows.reduce((s,r) => s+(r.commission_due||0), 0)
+
+  async function collect(w) {
+    if (busy) return
+    if (!confirm(`Mark ₹${w.commission_due} collected from ${w.name}?`)) return
+    setBusy(w.id)
+    const { error: pe } = await sb.from('payouts').insert({
+      worker_id: w.id, amount: w.commission_due, status:'paid', paid_at:new Date().toISOString(), utr:'COMMISSION-COLLECTED',
+    })
+    const { error: we } = await sb.from('workers').update({ commission_due: 0 }).eq('id', w.id)
+    setBusy(null)
+    if (pe || we) { alert('Failed: '+(pe?.message||we?.message)+' (are you signed in as admin?)'); return }
+    load()
+  }
+
+  return (
+    <div>
+      <h2 style={{ fontSize:18, fontWeight:700, marginBottom:6 }}>Commission Ledger</h2>
+      <p style={{ fontSize:13, color:'#666', marginBottom:16 }}>10% platform fee per completed job, owed by workers. Total outstanding: <b style={{ color:Y }}>₹{total.toLocaleString('en-IN')}</b></p>
+      <Card style={{ padding:0 }}>
+        <Table loading={loading} rows={rows} cols={[
+          { key:'name',  label:'Worker' },
+          { key:'phone', label:'Phone'  },
+          { key:'city',  label:'City'   },
+          { key:'upi_id', label:'UPI'   },
+          { key:'total_jobs', label:'Jobs' },
+          { key:'commission_due', label:'Due', render: r => <b style={{ color:Y }}>₹{r.commission_due}</b> },
+          { key:'_act', label:'', render: r => (
+            <button onClick={() => collect(r)} disabled={busy===r.id}
+              style={{ background:'#16a34a', color:'#fff', border:'none', borderRadius:8, padding:'6px 14px', fontWeight:700, cursor:'pointer', fontSize:12, opacity:busy===r.id?.6:1 }}>
+              {busy===r.id ? '...' : 'Mark Collected'}
+            </button>
+          )},
+        ]} />
+      </Card>
+    </div>
+  )
+}
+
+const SCREENS = { overview: Overview, bookings: Bookings, workers: Workers, kyc: KYCReview, commissions: Commissions, disputes: Disputes, payouts: Payouts, pricing: Pricing }
 
 // ── Login ─────────────────────────────────────────────────────────────────────
+const ADMIN_EMAIL = 'admin@kaamready.in'
 function Login({ onLogin }) {
   const [pass, setPass] = useState('')
   const [err,  setErr]  = useState('')
-  function submit() {
-    if (pass === ADMIN_PASS) { onLogin(); return }
-    setErr('Incorrect password'); setPass('')
+  const [busy, setBusy] = useState(false)
+  async function submit() {
+    if (busy) return
+    setBusy(true); setErr('')
+    const { data, error } = await sb.auth.signInWithPassword({ email: ADMIN_EMAIL, password: pass })
+    setBusy(false)
+    if (error || !data?.session) { setErr('Incorrect password'); setPass(''); return }
+    onLogin()
   }
   return (
     <div style={{ height:'100vh', display:'flex', alignItems:'center', justifyContent:'center', background:'#0f0f0f' }}>
@@ -276,6 +427,7 @@ function Login({ onLogin }) {
             fontSize:15, fontWeight:800, cursor:'pointer', fontFamily:'inherit' }}>
           Sign In →
         </button>
+        <p style={{ fontSize:11, color:'#444', marginTop:12 }}>Signs in as {ADMIN_EMAIL}</p>
       </div>
     </div>
   )
@@ -283,11 +435,15 @@ function Login({ onLogin }) {
 
 // ── App ───────────────────────────────────────────────────────────────────────
 export default function App() {
-  const [authed, setAuthed] = useState(() => sessionStorage.getItem('kr_admin') === '1')
+  const [authed, setAuthed] = useState(false)
   const [active, setActive] = useState('overview')
-
-  function login() { sessionStorage.setItem('kr_admin','1'); setAuthed(true) }
-  function logout() { sessionStorage.removeItem('kr_admin'); setAuthed(false) }
+  useEffect(() => {
+    sb.auth.getSession().then(({ data }) => {
+      if (data?.session?.user?.email === ADMIN_EMAIL) setAuthed(true)
+    })
+  }, [])
+  function login() { setAuthed(true) }
+  function logout() { sb.auth.signOut(); setAuthed(false) }
 
   if (!authed) return <Login onLogin={login} />
 
