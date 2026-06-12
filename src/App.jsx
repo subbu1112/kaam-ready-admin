@@ -11,7 +11,7 @@ const NAV = [
   { id: 'kyc',       label: '🛡️ KYC Review' },
   { id: 'commissions', label: '💸 Commissions' },
   { id: 'welfare',   label: '🏛️ Welfare Fee' },
-  { id: 'recharges', label: '⚡ Recharges'   },
+  { id: 'payments',  label: '💳 Verify Payments' },
   { id: 'disputes',  label: '⚠️ Disputes'  },
   { id: 'payouts',   label: '💰 Payouts'   },
   { id: 'pricing',   label: '🏷️ Pricing'   },
@@ -514,7 +514,124 @@ function Recharges() {
   )
 }
 
-const SCREENS = { overview: Overview, bookings: Bookings, workers: Workers, kyc: KYCReview, commissions: Commissions, welfare: WelfareFee, recharges: Recharges, disputes: Disputes, payouts: Payouts, pricing: Pricing }
+const COMMISSION = 0.10
+function VerifyPayments() {
+  const [rows, setRows] = useState([])
+  const [workers, setWorkers] = useState({})
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(null)
+  const load = useCallback(async () => {
+    setLoading(true)
+    const [{ data: b }, { data: w }] = await Promise.all([
+      sb.from('bookings').select('*').eq('payment_status','claimed').order('customer_paid_at', { ascending:true }),
+      sb.from('workers').select('id,name,phone,wallet_balance,total_jobs,upi_id'),
+    ])
+    setRows(b || [])
+    setWorkers(Object.fromEntries((w||[]).map(x => [x.id, x])))
+    setLoading(false)
+  }, [])
+  useEffect(() => { load() }, [load])
+  async function confirmPayment(b) {
+    if (busy) return
+    if (!confirm(`Confirm ₹${b.amount} arrived in your UPI for "${b.service}" (${b.customer_name||'customer'})? Check your UPI app first.`)) return
+    setBusy(b.id)
+    const fee = Math.round((b.amount||0)*COMMISSION)
+    const { error } = await sb.from('bookings').update({
+      payment_status:'paid', status:'completed',
+      payment_confirmed_at:new Date().toISOString(), completed_at:new Date().toISOString(),
+    }).eq('id', b.id)
+    if (!error && b.worker_id) {
+      const w = workers[b.worker_id]
+      await sb.from('workers').update({
+        wallet_balance: (w?.wallet_balance||0) + (b.amount||0) - fee,
+        total_jobs: (w?.total_jobs||0) + 1,
+      }).eq('id', b.worker_id)
+    }
+    setBusy(null)
+    if (error) alert('Failed: '+error.message); else load()
+  }
+  return (
+    <div>
+      <h2 style={{ fontSize:18, fontWeight:700, marginBottom:6 }}>Verify Payments — {rows.length} pending</h2>
+      <p style={{ fontSize:13, color:'#666', marginBottom:16 }}>Customers pay Kaam Ready's UPI. Check your UPI app, then confirm here — this completes the booking and credits the worker's payout balance (amount minus 10% fee).</p>
+      <Card style={{ padding:0 }}>
+        <Table loading={loading} rows={rows} cols={[
+          { key:'customer_paid_at', label:'Paid At', render: r => fmt(r.customer_paid_at) },
+          { key:'service',        label:'Service' },
+          { key:'customer_name',  label:'Customer', render: r => (r.customer_name||'—')+(r.customer_phone?' · '+r.customer_phone:'') },
+          { key:'worker_id',      label:'Worker',  render: r => workers[r.worker_id]?.name || '—' },
+          { key:'amount',         label:'Amount',  render: r => <b style={{ color:Y }}>₹{r.amount}</b> },
+          { key:'_fee',           label:'Your Fee', render: r => '₹'+Math.round((r.amount||0)*COMMISSION) },
+          { key:'_act', label:'', render: r => (
+            <button onClick={() => confirmPayment(r)} disabled={busy===r.id}
+              style={{ background:'#16a34a', color:'#fff', border:'none', borderRadius:8, padding:'6px 14px', fontWeight:700, cursor:'pointer', fontSize:12 }}>
+              {busy===r.id ? '...' : '✓ Money Received'}
+            </button>
+          )},
+        ]} />
+      </Card>
+    </div>
+  )
+}
+
+function WeeklyPayouts() {
+  const [rows, setRows] = useState([])
+  const [history, setHistory] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(null)
+  const load = useCallback(async () => {
+    setLoading(true)
+    const [{ data: w }, { data: p }] = await Promise.all([
+      sb.from('workers').select('id,name,phone,upi_id,wallet_balance,total_jobs').gt('wallet_balance', 0).order('wallet_balance', { ascending:false }),
+      sb.from('payouts').select('*').order('created_at', { ascending:false }).limit(50),
+    ])
+    setRows(w || []); setHistory(p || []); setLoading(false)
+  }, [])
+  useEffect(() => { load() }, [load])
+  async function payout(w) {
+    if (busy) return
+    const utr = prompt(`Pay ₹${w.wallet_balance} to ${w.name} (${w.upi_id||'no UPI set!'}) from your UPI app, then enter the UPI reference/UTR number:`)
+    if (utr === null) return
+    setBusy(w.id)
+    const { error: pe } = await sb.from('payouts').insert({ worker_id:w.id, amount:w.wallet_balance, status:'paid', utr:utr||'manual', paid_at:new Date().toISOString() })
+    const { error: we } = await sb.from('workers').update({ wallet_balance: 0 }).eq('id', w.id)
+    setBusy(null)
+    if (pe || we) { alert('Failed: '+(pe?.message||we?.message)); return }
+    load()
+  }
+  const total = rows.reduce((s,r)=>s+(r.wallet_balance||0),0)
+  return (
+    <div>
+      <h2 style={{ fontSize:18, fontWeight:700, marginBottom:6 }}>Weekly Payouts</h2>
+      <p style={{ fontSize:13, color:'#666', marginBottom:16 }}>Owed to workers from verified payments (after your 10% fee). Total due: <b style={{ color:Y }}>₹{total.toLocaleString('en-IN')}</b>. Pay via UPI, then record it here.</p>
+      <Card style={{ padding:0, marginBottom:18 }}>
+        <Table loading={loading} rows={rows} cols={[
+          { key:'name',  label:'Worker' },
+          { key:'phone', label:'Phone'  },
+          { key:'upi_id',label:'UPI ID', render: r => r.upi_id || <span style={{ color:'#f87171' }}>not set</span> },
+          { key:'wallet_balance', label:'Due', render: r => <b style={{ color:Y }}>₹{r.wallet_balance}</b> },
+          { key:'_act', label:'', render: r => (
+            <button onClick={() => payout(r)} disabled={busy===r.id}
+              style={{ background:'#16a34a', color:'#fff', border:'none', borderRadius:8, padding:'6px 14px', fontWeight:700, cursor:'pointer', fontSize:12 }}>
+              {busy===r.id ? '...' : '💸 Mark Paid'}
+            </button>
+          )},
+        ]} />
+      </Card>
+      <h3 style={{ fontSize:14, fontWeight:700, marginBottom:10, color:'#888' }}>Payout history</h3>
+      <Card style={{ padding:0 }}>
+        <Table loading={false} rows={history} cols={[
+          { key:'created_at', label:'Date',   render: r => fmt(r.created_at) },
+          { key:'amount',     label:'Amount', render: r => '₹'+(r.amount||0) },
+          { key:'utr',        label:'UTR'    },
+          { key:'status',     label:'Status', render: r => <Badge status={r.status} /> },
+        ]} />
+      </Card>
+    </div>
+  )
+}
+
+const SCREENS = { overview: Overview, bookings: Bookings, workers: Workers, kyc: KYCReview, commissions: Commissions, welfare: WelfareFee, payments: VerifyPayments, disputes: Disputes, payouts: WeeklyPayouts, pricing: Pricing }
 
 // ── Login ─────────────────────────────────────────────────────────────────────
 const ADMIN_EMAIL = 'admin@kaamready.in'
