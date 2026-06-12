@@ -11,6 +11,7 @@ const NAV = [
   { id: 'kyc',       label: '🛡️ KYC Review' },
   { id: 'commissions', label: '💸 Commissions' },
   { id: 'welfare',   label: '🏛️ Welfare Fee' },
+  { id: 'recharges', label: '⚡ Recharges'   },
   { id: 'disputes',  label: '⚠️ Disputes'  },
   { id: 'payouts',   label: '💰 Payouts'   },
   { id: 'pricing',   label: '🏷️ Pricing'   },
@@ -178,7 +179,7 @@ function Workers() {
           { key:'rating',         label:'Rating',   render: r => r.rating ? `⭐ ${r.rating}` : '—' },
           { key:'total_jobs',     label:'Jobs'      },
           { key:'wallet_balance', label:'Wallet',   render: r => `₹${r.wallet_balance || 0}` },
-          { key:'commission_due', label:'Comm. Due', render: r => `₹${r.commission_due || 0}` },
+          { key:'credit_balance', label:'Credits',  render: r => `₹${r.credit_balance || 0}` },
           { key:'upi_id',         label:'UPI',      render: r => r.upi_id || '—' },
           { key:'price_max',      label:'Max ₹',    render: r => r.price_max ? `₹${r.price_max}` : '—' },
           { key:'is_online',      label:'Online',   render: r => r.is_online ? '🟢' : '🔴' },
@@ -460,7 +461,60 @@ function WelfareFee() {
   )
 }
 
-const SCREENS = { overview: Overview, bookings: Bookings, workers: Workers, kyc: KYCReview, commissions: Commissions, welfare: WelfareFee, disputes: Disputes, payouts: Payouts, pricing: Pricing }
+function Recharges() {
+  const [rows, setRows] = useState([])
+  const [workers, setWorkers] = useState({})
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(null)
+  const load = useCallback(async () => {
+    setLoading(true)
+    const [{ data: r }, { data: w }] = await Promise.all([
+      sb.from('recharges').select('*').order('claimed_at', { ascending:false }).limit(100),
+      sb.from('workers').select('id,name,phone,credit_balance'),
+    ])
+    setRows(r || [])
+    setWorkers(Object.fromEntries((w||[]).map(x => [x.id, x])))
+    setLoading(false)
+  }, [])
+  useEffect(() => { load() }, [load])
+  async function decide(r, ok) {
+    if (busy) return
+    const w = workers[r.worker_id]
+    if (ok && !confirm(`Confirm ₹${r.amount} received from ${w?.name||'worker'}? Check your UPI app first.`)) return
+    setBusy(r.id)
+    const { error } = await sb.from('recharges').update({ status: ok?'confirmed':'rejected', confirmed_at: new Date().toISOString() }).eq('id', r.id)
+    if (!error && ok) {
+      await sb.from('workers').update({ credit_balance: (w?.credit_balance||0) + r.amount }).eq('id', r.worker_id)
+    }
+    setBusy(null)
+    if (error) alert('Failed: '+error.message); else load()
+  }
+  return (
+    <div>
+      <h2 style={{ fontSize:18, fontWeight:700, marginBottom:6 }}>Credit Recharges</h2>
+      <p style={{ fontSize:13, color:'#666', marginBottom:16 }}>Workers prepay credits via UPI; confirm here after checking the money arrived in your UPI account. Confirming adds the amount to their credit balance.</p>
+      <Card style={{ padding:0 }}>
+        <Table loading={loading} rows={rows} cols={[
+          { key:'claimed_at', label:'Date',   render: r => fmt(r.claimed_at) },
+          { key:'worker_id',  label:'Worker', render: r => workers[r.worker_id]?.name || '—' },
+          { key:'phone',      label:'Phone',  render: r => workers[r.worker_id]?.phone || '—' },
+          { key:'amount',     label:'Amount', render: r => <b style={{ color:Y }}>₹{r.amount}</b> },
+          { key:'status',     label:'Status', render: r => <Badge status={r.status==='claimed'?'pending':r.status==='confirmed'?'paid':'failed'} /> },
+          { key:'_act', label:'', render: r => r.status==='claimed' && (
+            <div style={{ display:'flex', gap:6 }}>
+              <button onClick={() => decide(r, true)} disabled={busy===r.id}
+                style={{ background:'#16a34a', color:'#fff', border:'none', borderRadius:8, padding:'6px 12px', fontWeight:700, cursor:'pointer', fontSize:12 }}>✓ Confirm</button>
+              <button onClick={() => decide(r, false)} disabled={busy===r.id}
+                style={{ background:'#dc2626', color:'#fff', border:'none', borderRadius:8, padding:'6px 12px', fontWeight:700, cursor:'pointer', fontSize:12 }}>✕</button>
+            </div>
+          )},
+        ]} />
+      </Card>
+    </div>
+  )
+}
+
+const SCREENS = { overview: Overview, bookings: Bookings, workers: Workers, kyc: KYCReview, commissions: Commissions, welfare: WelfareFee, recharges: Recharges, disputes: Disputes, payouts: Payouts, pricing: Pricing }
 
 // ── Login ─────────────────────────────────────────────────────────────────────
 const ADMIN_EMAIL = 'admin@kaamready.in'
