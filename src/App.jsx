@@ -541,10 +541,12 @@ function VerifyPayments() {
       payment_confirmed_at:new Date().toISOString(), completed_at:new Date().toISOString(),
     }).eq('id', b.id)
     if (!error && b.worker_id) {
-      const w = workers[b.worker_id]
+      // Fetch fresh to avoid stale wallet from initial load
+      const { data: fresh } = await sb.from('workers').select('wallet_balance,total_jobs').eq('id', b.worker_id).single()
+      const base = fresh || {}
       await sb.from('workers').update({
-        wallet_balance: (w?.wallet_balance||0) + (b.amount||0) - fee,
-        total_jobs: (w?.total_jobs||0) + 1,
+        wallet_balance: (base.wallet_balance||0) + (b.amount||0) - fee,
+        total_jobs: (base.total_jobs||0) + 1,
       }).eq('id', b.worker_id)
     }
     setBusy(null)
