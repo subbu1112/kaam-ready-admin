@@ -5,7 +5,7 @@ const Y = '#F5C000'
 const ADMIN_PASS = import.meta.env.VITE_ADMIN_PASS || 'kaamready@admin'
 
 const NAV = [
-  { id: 'overview',  label: '📊 Overview'  },
+  { id: 'overview',  label: '📊 Analytics'  },
   { id: 'bookings',  label: '📋 Bookings'  },
   { id: 'workers',   label: '👷 Workers'   },
   { id: 'kyc',       label: '🛡️ KYC Review' },
@@ -82,46 +82,416 @@ function fmt(ts) { return ts ? new Date(ts).toLocaleDateString('en-IN', { day:'2
 
 // ── Screens ──────────────────────────────────────────────────────────────────
 
-function Overview() {
-  const [stats, setStats] = useState(null)
-  useEffect(() => {
-    Promise.all([
-      sb.from('bookings').select('id, status, amount'),
-      sb.from('workers').select('id, is_online, onboarding_done'),
-      sb.from('profiles').select('id'),
-      sb.from('disputes').select('id, status'),
-    ]).then(([b, w, p, d]) => {
-      const bookings = b.data || []
-      const workers  = w.data || []
-      const rev = bookings.filter(x => x.status === 'completed').reduce((s, x) => s + (x.amount || 0), 0)
-      setStats({
-        totalBookings: bookings.length,
-        activeBookings: bookings.filter(x => ['searching','assigned','priced','scheduled'].includes(x.status)).length,
-        completedBookings: bookings.filter(x => x.status === 'completed').length,
-        revenue: rev,
-        totalWorkers: workers.length,
-        onlineWorkers: workers.filter(x => x.is_online).length,
-        totalCustomers: (p.data || []).length,
-        openDisputes: (d.data || []).filter(x => x.status === 'open').length,
-      })
-    })
-  }, [])
+// ANALYTICS SECTION — replaces Overview() function
 
-  if (!stats) return <p style={{ color:'#555' }}>Loading…</p>
+function MiniBar({ pct, color = '#F5C000' }) {
   return (
-    <div>
-      <h2 style={{ fontSize:18, fontWeight:700, marginBottom:20 }}>Overview</h2>
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))', gap:12 }}>
-        <StatCard label="Total Bookings"    value={stats.totalBookings}    sub={`${stats.activeBookings} active`} />
-        <StatCard label="Completed Jobs"    value={stats.completedBookings} />
-        <StatCard label="Revenue"           value={`₹${stats.revenue.toLocaleString()}`} sub="from completed jobs" />
-        <StatCard label="Workers"           value={stats.totalWorkers}    sub={`${stats.onlineWorkers} online`} />
-        <StatCard label="Customers"         value={stats.totalCustomers}  />
-        <StatCard label="Open Disputes"     value={stats.openDisputes}    />
-      </div>
+    <div style={{ background:'#2a2a2a', borderRadius:4, height:8, overflow:'hidden', flex:1 }}>
+      <div style={{ height:'100%', width: pct + '%', background: color, borderRadius:4,
+        transition:'width 1.2s cubic-bezier(.22,1,.36,1)', maxWidth:'100%' }} />
     </div>
   )
 }
+
+function TrendBadge({ value }) {
+  if (value === null || value === undefined) return null
+  const up = value >= 0
+  return (
+    <span style={{ fontSize:11, fontWeight:700, color: up ? '#4ade80' : '#f87171',
+      background: up ? 'rgba(74,222,128,.12)' : 'rgba(248,113,113,.12)',
+      padding:'2px 7px', borderRadius:20 }}>
+      {up ? '↑' : '↓'} {Math.abs(value)}%
+    </span>
+  )
+}
+
+function DonutChart({ data, size = 120 }) {
+  const total = data.reduce((s, d) => s + d.v, 0)
+  if (!total) return <div style={{ width:size, height:size, borderRadius:'50%', background:'#2a2a2a' }} />
+  let cumAngle = -90
+  const cx = size/2, cy = size/2, r = size*0.38, sw = size*0.12
+  const segments = data.map(d => {
+    const angle = (d.v / total) * 360
+    const startAngle = cumAngle; cumAngle += angle
+    return { ...d, startAngle, angle }
+  })
+  function polarToXY(angle, radius) {
+    const rad = (angle * Math.PI) / 180
+    return [cx + radius * Math.cos(rad), cy + radius * Math.sin(rad)]
+  }
+  function arcPath(start, angle) {
+    const [x1,y1] = polarToXY(start, r)
+    const end = start + angle - 0.3
+    const [x2,y2] = polarToXY(end, r)
+    const large = angle > 180 ? 1 : 0
+    return `M ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2}`
+  }
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ flexShrink:0 }}>
+      <circle cx={cx} cy={cy} r={r} fill="none" stroke="#2a2a2a" strokeWidth={sw} />
+      {segments.map((s,i) => s.angle > 1 && (
+        <path key={i} d={arcPath(s.startAngle, s.angle)} fill="none"
+          stroke={s.color} strokeWidth={sw} strokeLinecap="round" />
+      ))}
+      <text x={cx} y={cy+1} textAnchor="middle" dominantBaseline="middle"
+        style={{ fill:'#fff', fontSize: size*0.13, fontWeight:800, fontFamily:'Inter,sans-serif' }}>
+        {total}
+      </text>
+      <text x={cx} y={cy+size*0.13} textAnchor="middle" dominantBaseline="middle"
+        style={{ fill:'#666', fontSize: size*0.085, fontFamily:'Inter,sans-serif' }}>
+        total
+      </text>
+    </svg>
+  )
+}
+
+function SparkLine({ data, color = '#F5C000', height = 40, width = 120 }) {
+  if (!data || data.length < 2) return null
+  const max = Math.max(...data, 1)
+  const pts = data.map((v, i) => [
+    (i / (data.length - 1)) * width,
+    height - (v / max) * (height - 4)
+  ])
+  const path = pts.map((p, i) => `${i===0?'M':'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ')
+  const area = path + ` L${width},${height} L0,${height} Z`
+  return (
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ overflow:'visible' }}>
+      <defs>
+        <linearGradient id={'sg'+color.replace('#','')} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.3" />
+          <stop offset="100%" stopColor={color} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <path d={area} fill={`url(#sg${color.replace('#','')})`} />
+      <path d={path} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx={pts[pts.length-1][0]} cy={pts[pts.length-1][1]} r="3" fill={color} />
+    </svg>
+  )
+}
+
+function Overview() {
+  const [stats, setStats]       = useState(null)
+  const [bookings, setBookings] = useState([])
+  const [profiles, setProfiles] = useState([])
+  const [workers, setWorkers]   = useState([])
+  const [loading, setLoading]   = useState(true)
+  const [lastRefresh, setLastRefresh] = useState(Date.now())
+
+  function refresh() { setLastRefresh(Date.now()) }
+
+  useEffect(() => {
+    setLoading(true)
+    Promise.all([
+      sb.from('bookings').select('id, status, amount, service, created_at, city, payment_status, user_id'),
+      sb.from('workers').select('id, is_online, onboarding_done, skill, city, created_at, total_jobs, rating'),
+      sb.from('profiles').select('id, city, created_at'),
+      sb.from('disputes').select('id, status'),
+    ]).then(([b, w, p, d]) => {
+      const bks = b.data || []
+      const wks = w.data || []
+      const prs = p.data || []
+      const dsp = d.data || []
+
+      const rev = bks.filter(x => x.status === 'completed').reduce((s, x) => s + (x.amount || 0), 0)
+      const commission = rev * 0.10
+
+      // Last 7 days bookings per day
+      const now = new Date()
+      const days7 = Array.from({length:7}, (_,i) => {
+        const d = new Date(now); d.setDate(d.getDate() - (6-i))
+        return d.toISOString().slice(0,10)
+      })
+      const bksByDay = days7.map(day => bks.filter(b => b.created_at?.slice(0,10) === day).length)
+      const signupsByDay = days7.map(day => prs.filter(p => p.created_at?.slice(0,10) === day).length)
+
+      // Service breakdown
+      const svcMap = {}
+      bks.forEach(b => { if (b.service) svcMap[b.service] = (svcMap[b.service] || 0) + 1 })
+      const topSvcs = Object.entries(svcMap).sort((a,b)=>b[1]-a[1]).slice(0,8)
+
+      // City breakdown
+      const cityMap = {}
+      bks.forEach(b => { if (b.city) cityMap[b.city] = (cityMap[b.city] || 0) + 1 })
+      const topCities = Object.entries(cityMap).sort((a,b)=>b[1]-a[1]).slice(0,5)
+
+      // Conversion funnel
+      const uniqueBookers = new Set(bks.map(b=>b.user_id)).size
+      const funnel = {
+        signups: prs.length,
+        bookers: uniqueBookers,
+        completed: new Set(bks.filter(b=>b.status==='completed').map(b=>b.user_id)).size,
+      }
+
+      // Week-over-week
+      const thisWeek = bks.filter(b => {
+        const d = new Date(b.created_at); const diff = (now-d)/(1000*3600*24)
+        return diff < 7
+      }).length
+      const lastWeek = bks.filter(b => {
+        const d = new Date(b.created_at); const diff = (now-d)/(1000*3600*24)
+        return diff >= 7 && diff < 14
+      }).length
+      const wow = lastWeek > 0 ? Math.round(((thisWeek-lastWeek)/lastWeek)*100) : null
+
+      // Revenue by day (last 7)
+      const revByDay = days7.map(day =>
+        bks.filter(b => b.created_at?.slice(0,10) === day && b.status === 'completed')
+           .reduce((s,b)=>s+(b.amount||0),0)
+      )
+
+      // Status split
+      const statusSplit = ['searching','assigned','priced','completed','cancelled','scheduled']
+        .map(s => ({ label: s, v: bks.filter(b=>b.status===s).length }))
+        .filter(x=>x.v>0)
+
+      const SVC_COLORS_MAP = ['#F5C000','#60a5fa','#4ade80','#f87171','#a78bfa','#fb923c','#34d399','#e879f9']
+
+      setStats({
+        totalBookings: bks.length, activeBookings: bks.filter(x=>['searching','assigned','priced','scheduled'].includes(x.status)).length,
+        completedBookings: bks.filter(x=>x.status==='completed').length,
+        cancelledBookings: bks.filter(x=>x.status==='cancelled').length,
+        revenue: rev, commission,
+        totalWorkers: wks.length, onlineWorkers: wks.filter(x=>x.is_online).length,
+        verifiedWorkers: wks.filter(x=>x.onboarding_done).length,
+        totalCustomers: prs.length,
+        openDisputes: dsp.filter(x=>x.status==='open').length,
+        bksByDay, signupsByDay, revByDay, days7,
+        topSvcs: topSvcs.map(([k,v],i)=>({k,v,color:SVC_COLORS_MAP[i%SVC_COLORS_MAP.length]})),
+        topCities, funnel, wow, thisWeek, lastWeek,
+        statusSplit: statusSplit.map((s,i)=>({...s,color:SVC_COLORS_MAP[i%SVC_COLORS_MAP.length]})),
+        completionRate: bks.length>0 ? Math.round((bks.filter(x=>x.status==='completed').length/bks.length)*100) : 0,
+        avgRating: wks.filter(x=>x.rating).length ? (wks.reduce((s,x)=>s+(x.rating||0),0)/wks.filter(x=>x.rating).length).toFixed(1) : '—',
+        avgJobsPerWorker: wks.length ? (wks.reduce((s,x)=>s+(x.total_jobs||0),0)/wks.length).toFixed(1) : '—',
+        pendingPayments: bks.filter(x=>x.payment_status==='claimed').length,
+      })
+      setLoading(false)
+    })
+  }, [lastRefresh])
+
+  if (loading || !stats) return (
+    <div style={{ display:'flex', gap:12, flexDirection:'column' }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+        <h2 style={{ fontSize:20, fontWeight:800 }}>Analytics</h2>
+      </div>
+      {[1,2,3].map(i => (
+        <div key={i} style={{ background:'#1a1a1a', borderRadius:12, padding:20, height:80,
+          animation:'shimmer 1.5s ease infinite', backgroundImage:'linear-gradient(90deg,#1a1a1a 0%,#252525 50%,#1a1a1a 100%)', backgroundSize:'200% 100%' }} />
+      ))}
+    </div>
+  )
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:24 }}>
+
+      {/* Header */}
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:12 }}>
+        <div>
+          <h2 style={{ fontSize:20, fontWeight:800, margin:0 }}>Analytics Dashboard</h2>
+          <p style={{ fontSize:12, color:'#555', marginTop:4 }}>Real-time data from Supabase</p>
+        </div>
+        <button onClick={refresh} style={{ background:'#1a1a1a', border:'1px solid #2a2a2a', borderRadius:10,
+          padding:'8px 16px', color:'#888', fontSize:13, cursor:'pointer', fontFamily:'Inter,sans-serif',
+          display:'flex', alignItems:'center', gap:6 }}>
+          🔄 Refresh
+        </button>
+      </div>
+
+      {/* KPI Row */}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))', gap:12 }}>
+        {[
+          { label:'Total Users',       value: stats.totalCustomers,       sub:'registered accounts',      color:'#60a5fa',  spark: stats.signupsByDay },
+          { label:'Total Bookings',    value: stats.totalBookings,        sub:`${stats.activeBookings} active`, color:'#F5C000', spark: stats.bksByDay },
+          { label:'Completed Jobs',    value: stats.completedBookings,    sub:`${stats.completionRate}% completion`, color:'#4ade80', spark: null },
+          { label:'Platform Revenue',  value:`₹${stats.revenue.toLocaleString()}`, sub:`₹${Math.round(stats.commission).toLocaleString()} commission`, color:'#a78bfa', spark: stats.revByDay },
+          { label:'Workers',           value: stats.totalWorkers,         sub:`${stats.onlineWorkers} online now`, color:'#fb923c', spark: null },
+          { label:'Pending Verify',    value: stats.pendingPayments,      sub:'payments to confirm',      color:'#f87171',  spark: null },
+        ].map(kpi => (
+          <div key={kpi.label} style={{ background:'#1a1a1a', border:'1px solid #222', borderRadius:12,
+            padding:'16px', position:'relative', overflow:'hidden' }}>
+            <div style={{ position:'absolute', top:12, right:12, opacity:.25 }}>
+              {kpi.spark && <SparkLine data={kpi.spark} color={kpi.color} />}
+            </div>
+            <p style={{ fontSize:11, color:'#555', fontWeight:600, letterSpacing:.5, textTransform:'uppercase', marginBottom:8 }}>{kpi.label}</p>
+            <p style={{ fontSize:26, fontWeight:900, color:kpi.color, margin:'0 0 4px', letterSpacing:'-0.5px' }}>{kpi.value}</p>
+            {stats.wow !== null && kpi.label === 'Total Bookings' && (
+              <span style={{ marginRight:6 }}><TrendBadge value={stats.wow} /></span>
+            )}
+            <p style={{ fontSize:11, color:'#444', margin:0 }}>{kpi.sub}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Row 2: Service breakdown + Status donut */}
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
+
+        {/* Top Services */}
+        <div style={{ background:'#1a1a1a', border:'1px solid #222', borderRadius:12, padding:20 }}>
+          <p style={{ fontWeight:700, fontSize:14, marginBottom:16, color:'#ccc' }}>🔥 Top Services</p>
+          {stats.topSvcs.length === 0 ? <p style={{ color:'#444', fontSize:13 }}>No bookings yet</p> :
+            stats.topSvcs.map((s,i) => {
+              const pct = Math.round((s.v / stats.totalBookings) * 100)
+              return (
+                <div key={s.k} style={{ marginBottom:12 }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', marginBottom:4 }}>
+                    <span style={{ fontSize:13, color:'#ccc', fontWeight:600 }}>
+                      #{i+1} {s.k}
+                    </span>
+                    <span style={{ fontSize:12, color: s.color, fontWeight:700 }}>{s.v} ({pct}%)</span>
+                  </div>
+                  <MiniBar pct={pct} color={s.color} />
+                </div>
+              )
+            })
+          }
+        </div>
+
+        {/* Booking status donut */}
+        <div style={{ background:'#1a1a1a', border:'1px solid #222', borderRadius:12, padding:20 }}>
+          <p style={{ fontWeight:700, fontSize:14, marginBottom:16, color:'#ccc' }}>📊 Booking Status</p>
+          <div style={{ display:'flex', gap:16, alignItems:'center' }}>
+            <DonutChart data={stats.statusSplit} size={110} />
+            <div style={{ flex:1 }}>
+              {stats.statusSplit.map(s => (
+                <div key={s.label} style={{ display:'flex', alignItems:'center', gap:8, marginBottom:7 }}>
+                  <div style={{ width:8, height:8, borderRadius:'50%', background:s.color, flexShrink:0 }} />
+                  <span style={{ fontSize:12, color:'#888', flex:1, textTransform:'capitalize' }}>{s.label}</span>
+                  <span style={{ fontSize:12, color:'#ccc', fontWeight:700 }}>{s.v}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Row 3: 7-day chart + Funnel */}
+      <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr', gap:16 }}>
+
+        {/* 7-day bookings + signups */}
+        <div style={{ background:'#1a1a1a', border:'1px solid #222', borderRadius:12, padding:20 }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
+            <p style={{ fontWeight:700, fontSize:14, color:'#ccc', margin:0 }}>📈 Last 7 Days</p>
+            <div style={{ display:'flex', gap:16, fontSize:11, color:'#555' }}>
+              <span><span style={{ color:'#F5C000' }}>●</span> Bookings</span>
+              <span><span style={{ color:'#60a5fa' }}>●</span> Signups</span>
+            </div>
+          </div>
+          {/* Simple bar chart */}
+          <div style={{ display:'flex', gap:6, alignItems:'flex-end', height:80 }}>
+            {stats.days7.map((day, i) => {
+              const maxB = Math.max(...stats.bksByDay, 1)
+              const maxS = Math.max(...stats.signupsByDay, 1)
+              const maxAll = Math.max(maxB, maxS, 1)
+              const bH = Math.round((stats.bksByDay[i] / maxAll) * 72)
+              const sH = Math.round((stats.signupsByDay[i] / maxAll) * 72)
+              const label = new Date(day).toLocaleDateString('en-IN', { weekday:'short' })
+              return (
+                <div key={day} style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', gap:3 }}>
+                  <div style={{ display:'flex', gap:2, alignItems:'flex-end', height:72 }}>
+                    <div style={{ width:10, background:'#F5C000', borderRadius:'3px 3px 0 0', height:bH || 2,
+                      minHeight:2, transition:'height .8s cubic-bezier(.22,1,.36,1)', opacity:.9 }} title={`${stats.bksByDay[i]} bookings`} />
+                    <div style={{ width:10, background:'#60a5fa', borderRadius:'3px 3px 0 0', height:sH || 2,
+                      minHeight:2, transition:'height .8s cubic-bezier(.22,1,.36,1)', opacity:.9 }} title={`${stats.signupsByDay[i]} signups`} />
+                  </div>
+                  <span style={{ fontSize:9, color:'#444', marginTop:2 }}>{label}</span>
+                </div>
+              )
+            })}
+          </div>
+          <div style={{ display:'flex', gap:16, marginTop:12, paddingTop:12, borderTop:'1px solid #222' }}>
+            <div style={{ flex:1 }}>
+              <p style={{ fontSize:11, color:'#555', margin:'0 0 2px' }}>This week</p>
+              <p style={{ fontSize:18, fontWeight:800, color:'#F5C000', margin:0 }}>{stats.thisWeek} bookings</p>
+            </div>
+            {stats.wow !== null && (
+              <div style={{ flex:1 }}>
+                <p style={{ fontSize:11, color:'#555', margin:'0 0 2px' }}>vs last week</p>
+                <p style={{ fontSize:18, fontWeight:800, margin:0 }}><TrendBadge value={stats.wow} /></p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Conversion funnel */}
+        <div style={{ background:'#1a1a1a', border:'1px solid #222', borderRadius:12, padding:20 }}>
+          <p style={{ fontWeight:700, fontSize:14, color:'#ccc', marginBottom:16 }}>🎯 Conversion Funnel</p>
+          {[
+            { label:'Signed Up',  value: stats.funnel.signups,   color:'#60a5fa', emoji:'👤' },
+            { label:'Booked',     value: stats.funnel.bookers,   color:'#F5C000', emoji:'📋' },
+            { label:'Completed',  value: stats.funnel.completed, color:'#4ade80', emoji:'✅' },
+          ].map((f, i, arr) => {
+            const pct = i === 0 ? 100 : arr[0].value > 0 ? Math.round((f.value/arr[0].value)*100) : 0
+            return (
+              <div key={f.label} style={{ marginBottom:14 }}>
+                <div style={{ display:'flex', justifyContent:'space-between', marginBottom:5 }}>
+                  <span style={{ fontSize:12, color:'#888' }}>{f.emoji} {f.label}</span>
+                  <span style={{ fontSize:12, color:f.color, fontWeight:800 }}>{f.value}</span>
+                </div>
+                <div style={{ background:'#2a2a2a', borderRadius:6, height:10, overflow:'hidden' }}>
+                  <div style={{ height:'100%', width:pct+'%', background:f.color, borderRadius:6,
+                    transition:'width 1.4s cubic-bezier(.22,1,.36,1)', position:'relative' }}>
+                    {pct > 15 && <span style={{ position:'absolute', right:5, top:0, fontSize:9, lineHeight:'10px', color:'rgba(0,0,0,.7)', fontWeight:800 }}>{pct}%</span>}
+                  </div>
+                </div>
+                {i < arr.length-1 && (
+                  <p style={{ fontSize:10, color:'#333', marginTop:3, textAlign:'right' }}>
+                    {arr[0].value > 0 ? Math.round((f.value/arr[0].value)*100) : 0}% of users
+                  </p>
+                )}
+              </div>
+            )
+          })}
+          <div style={{ borderTop:'1px solid #2a2a2a', paddingTop:12, marginTop:4 }}>
+            <p style={{ fontSize:11, color:'#555', margin:'0 0 4px' }}>Completion Rate</p>
+            <p style={{ fontSize:22, fontWeight:900, color:'#4ade80', margin:0 }}>{stats.completionRate}%</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Row 4: Cities + Worker health */}
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
+
+        {/* City breakdown */}
+        <div style={{ background:'#1a1a1a', border:'1px solid #222', borderRadius:12, padding:20 }}>
+          <p style={{ fontWeight:700, fontSize:14, marginBottom:16, color:'#ccc' }}>🗺️ Bookings by City</p>
+          {stats.topCities.length === 0 ? <p style={{ color:'#444', fontSize:13 }}>No data</p> :
+            stats.topCities.map(([city, count]) => {
+              const pct = Math.round((count/stats.totalBookings)*100)
+              return (
+                <div key={city} style={{ marginBottom:10 }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', marginBottom:3 }}>
+                    <span style={{ fontSize:13, color:'#ccc' }}>📍 {city || 'Unknown'}</span>
+                    <span style={{ fontSize:12, color:'#888' }}>{count} · {pct}%</span>
+                  </div>
+                  <MiniBar pct={pct} color='#60a5fa' />
+                </div>
+              )
+            })
+          }
+        </div>
+
+        {/* Worker health */}
+        <div style={{ background:'#1a1a1a', border:'1px solid #222', borderRadius:12, padding:20 }}>
+          <p style={{ fontWeight:700, fontSize:14, marginBottom:16, color:'#ccc' }}>👷 Worker Health</p>
+          {[
+            { label:'Total Workers',      value: stats.totalWorkers,       color:'#ccc'   },
+            { label:'Online Now',         value: stats.onlineWorkers,      color:'#4ade80'},
+            { label:'KYC Verified',       value: stats.verifiedWorkers,    color:'#F5C000'},
+            { label:'Avg Rating',         value: '⭐ '+stats.avgRating,    color:'#fb923c'},
+            { label:'Avg Jobs / Worker',  value: stats.avgJobsPerWorker,   color:'#a78bfa'},
+          ].map(s => (
+            <div key={s.label} style={{ display:'flex', justifyContent:'space-between',
+              alignItems:'center', padding:'9px 0', borderBottom:'1px solid #222' }}>
+              <span style={{ fontSize:13, color:'#666' }}>{s.label}</span>
+              <span style={{ fontSize:14, fontWeight:800, color:s.color }}>{s.value}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+    </div>
+  )
+}
+
 
 function Bookings() {
   const [rows, setRows] = useState([])
