@@ -536,21 +536,26 @@ function VerifyPayments() {
     if (!confirm(`Confirm ₹${b.amount} arrived in your UPI for "${b.service}" (${b.customer_name||'customer'})? Check your UPI app first.`)) return
     setBusy(b.id)
     const fee = Math.round((b.amount||0)*COMMISSION)
+    // Guard: only confirm if still in claimed state — prevents double-confirm
     const { error } = await sb.from('bookings').update({
       payment_status:'paid', status:'completed',
       payment_confirmed_at:new Date().toISOString(), completed_at:new Date().toISOString(),
-    }).eq('id', b.id)
-    if (!error && b.worker_id) {
-      // Fetch fresh to avoid stale wallet from initial load
+    }).eq('id', b.id).eq('payment_status','claimed')
+    if (error) { setBusy(null); alert('Failed: '+error.message); return }
+    if (b.worker_id) {
+      // Fetch fresh wallet to avoid stale read → double-credit
       const { data: fresh } = await sb.from('workers').select('wallet_balance,total_jobs').eq('id', b.worker_id).single()
       const base = fresh || {}
-      await sb.from('workers').update({
+      const { error: we } = await sb.from('workers').update({
         wallet_balance: (base.wallet_balance||0) + (b.amount||0) - fee,
         total_jobs: (base.total_jobs||0) + 1,
       }).eq('id', b.worker_id)
+      if (we) {
+        alert('⚠️ Payment marked complete but worker wallet update FAILED. Manually add ₹' + ((b.amount||0)-fee) + ' to worker ' + (b.worker_id) + '. Error: ' + we.message)
+      }
     }
     setBusy(null)
-    if (error) alert('Failed: '+error.message); else load()
+    load()
   }
   return (
     <div>
