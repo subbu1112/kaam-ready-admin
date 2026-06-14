@@ -1,155 +1,115 @@
 import { useState, useEffect } from 'react'
 import { sb } from '../lib/supabase'
-import TopBar from '../components/TopBar'
-import Badge from '../components/Badge'
-import Modal from '../components/Modal'
-import Loader from '../components/Loader'
-import { exportCSV, exportExcel } from '../lib/export'
-import { audit, AUDIT_ACTIONS } from '../lib/audit'
-import { notifyPaymentSuccess } from '../lib/notify'
 
-const fmt = d => d ? new Date(d).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '-'
-const INR = v => 'Rs.' + (v||0).toLocaleString('en-IN')
-function btnS(bg,size='md') { return { background:bg,color:'#fff',border:'none',borderRadius:size==='sm'?6:8,padding:size==='sm'?'5px 10px':'9px 16px',fontSize:size==='sm'?12:13,fontWeight:600,cursor:'pointer',whiteSpace:'nowrap' } }
+const th = { padding:'10px 14px', textAlign:'left', fontSize:11, fontWeight:700, color:'#64748b', textTransform:'uppercase', letterSpacing:.5, borderBottom:'1px solid #1e293b', whiteSpace:'nowrap' }
+const td = { padding:'10px 14px', fontSize:13, color:'#e2e8f0', borderBottom:'1px solid #0f172a', whiteSpace:'nowrap' }
 
 export default function Payments() {
-  const [payments, setPayments] = useState([])
+  const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState('all')
-  const [selected, setSelected] = useState(null)
-  const [verifyModal, setVerifyModal] = useState(null)  // payment being verified
-  const [refInput, setRefInput] = useState('')           // payment reference admin enters
-  const [saving, setSaving] = useState(false)
 
-  useEffect(() => { load() }, [])
-
-  async function load() {
-    setLoading(true)
-    const { data } = await sb.from('bookings')
-      .select('*, workers(name,phone,upi_id)')
-      .order('created_at',{ascending:false})
-    setPayments((data||[]).filter(b=>b.amount&&b.amount>0))
-    setLoading(false)
-  }
-
-  async function approvePayment() {
-    if (!verifyModal) return
-    setSaving(true)
-    const { data: { user } } = await sb.auth.getUser()
-    await sb.from('bookings').update({
-      payment_status: 'paid',
-      payment_confirmed_at: new Date().toISOString(),
-      payment_id: refInput.trim() || verifyModal.payment_id || null
-    }).eq('id', verifyModal.id)
-    await audit(user?.email || 'admin', AUDIT_ACTIONS.VERIFY_PAYMENT, 'booking', verifyModal.id, {
-      customer: verifyModal.customer_name, amount: verifyModal.amount, ref: refInput.trim()
-    })
-    if (verifyModal.customer_phone) {
-      await notifyPaymentSuccess(verifyModal.customer_phone, null, {
-        customerName: verifyModal.customer_name || '',
-        amount: String(verifyModal.amount || 0),
-        bookingId: verifyModal.id.slice(0,8),
-        service: verifyModal.service || '',
-      })
+  useEffect(() => {
+    async function load() {
+      const { data } = await sb.from('bookings')
+        .select('id,service,amount,status,payment_status,created_at,customer_name,worker_id,city')
+        .order('created_at', { ascending: false })
+        .limit(300)
+      setRows(data || [])
+      setLoading(false)
     }
-    setVerifyModal(null)
-    setRefInput('')
-    await load()
-    setSaving(false)
-    setSelected(null)
-  }
+    load()
+  }, [])
 
-  async function updatePayment(id, status) {
-    setSaving(true)
-    const { data: { user } } = await sb.auth.getUser()
-    await sb.from('bookings').update({
-      payment_status: status,
-      payment_confirmed_at: status==='paid' ? new Date().toISOString() : null
-    }).eq('id', id)
-    const action = status==='paid' ? AUDIT_ACTIONS.VERIFY_PAYMENT : status==='refunded' ? AUDIT_ACTIONS.REFUND_PAYMENT : AUDIT_ACTIONS.REJECT_PAYMENT
-    await audit(user?.email || 'admin', action, 'booking', id, { status })
-    await load()
-    setSelected(s=>s?{...s,payment_status:status}:null)
-    setSaving(false)
-  }
-
-  const filtered = payments.filter(p => {
+  const filtered = rows.filter(r => {
     const q = search.toLowerCase()
-    const matchQ = !q||(p.customer_name||'').toLowerCase().includes(q)||(p.payment_id||'').toLowerCase().includes(q)||(p.service||'').toLowerCase().includes(q)
-    const matchF = filter==='all'||p.payment_status===filter||(filter==='pending'&&!p.payment_status)
-    return matchQ&&matchF
+    const matchQ = !q || r.customer_name?.toLowerCase().includes(q) || r.service?.toLowerCase().includes(q) || r.city?.toLowerCase().includes(q)
+    const matchF = filter === 'all' || r.payment_status === filter || r.status === filter
+    return matchQ && matchF
   })
 
-  const totalPaid = payments.filter(p=>p.payment_status==='paid').reduce((a,p)=>a+(p.amount||0),0)
-  const totalPending = payments.filter(p=>p.payment_status==='pending'||!p.payment_status).reduce((a,p)=>a+(p.amount||0),0)
-  const commission = Math.round(totalPaid*0.1)
-  const pendingCount = payments.filter(p=>p.payment_status==='pending'||!p.payment_status).length
+  const totalRevenue = rows.filter(r => r.status === 'completed').reduce((s, r) => s + (r.amount || 0), 0)
+  const totalCommission = Math.round(totalRevenue * 0.10)
+  const pendingCount = rows.filter(r => r.payment_status === 'pending').length
 
-  const th = { padding:'10px 16px',textAlign:'left',fontSize:12,fontWeight:700,color:'#64748b',textTransform:'uppercase',letterSpacing:'0.5px',background:'#f8fafc',borderBottom:'1px solid #e2e8f0' }
-  const td = { padding:'12px 16px',fontSize:14,color:'#1e293b',borderBottom:'1px solid #f1f5f9' }
-  const inp = { width:'100%', padding:'10px 12px', border:'1px solid #e2e8f0', borderRadius:8, fontSize:14, outline:'none', marginBottom:12, boxSizing:'border-box' }
+  const badge = s => {
+    const map = { completed:'#22c55e', confirmed:'#6366f1', pending:'#f59e0b', cancelled:'#ef4444', paid:'#22c55e' }
+    return <span style={{ background: (map[s]||'#475569')+'22', color: map[s]||'#94a3b8', padding:'2px 8px', borderRadius:6, fontSize:11, fontWeight:700 }}>{s}</span>
+  }
+
+  const fmt = n => '₹' + (n||0).toLocaleString('en-IN')
+  const fmtDate = d => d ? new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—'
 
   return (
-    <div>
-      <TopBar
-        title="Payment Management"
-        subtitle={`Collected: ${INR(totalPaid)} | Pending: ${INR(totalPending)} | Commission: ${INR(commission)}`}
-        actions={
-          <div style={{ display:'flex', gap:8 }}>
-            <button onClick={()=>exportCSV(filtered.map(p=>({Customer:p.customer_name,Service:p.service,Amount:p.amount,PaymentID:p.payment_id,Method:p.payment_method,Status:p.payment_status,Date:fmt(p.created_at)})),'payments')} style={btnS('#10b981')}>CSV</button>
-            <button onClick={()=>exportExcel(filtered.map(p=>({Customer:p.customer_name,Service:p.service,Amount:p.amount,PaymentID:p.payment_id,Method:p.payment_method,Status:p.payment_status,Date:fmt(p.created_at)})),'payments','Payments')} style={btnS('#3b82f6')}>Excel</button>
-          </div>
-        }
-      />
-      <div style={{ padding:32 }}>
+    <div style={{ padding:24, fontFamily:'inherit' }}>
+      <h1 style={{ color:'#f1f5f9', fontSize:22, fontWeight:800, marginBottom:4 }}>💳 Payments</h1>
+      <p style={{ color:'#64748b', fontSize:13, marginBottom:20 }}>All booking transactions</p>
 
-        {/* Pending verification banner */}
-        {pendingCount > 0 && (
-          <div style={{ background:'#fff7ed', border:'1px solid #f59e0b', borderRadius:10, padding:'14px 20px', marginBottom:20, display:'flex', alignItems:'center', gap:12 }}>
-            <span style={{ fontSize:22 }}>🔔</span>
-            <div style={{ flex:1 }}>
-              <div style={{ fontWeight:700, color:'#92400e', fontSize:14 }}>{pendingCount} customer payment{pendingCount>1?'s':''} awaiting verification</div>
-              <div style={{ fontSize:12, color:'#b45309', marginTop:2 }}>Total {INR(totalPending)} to verify. Review each payment and confirm or reject.</div>
-            </div>
-            <button onClick={()=>setFilter('pending')} style={{ ...btnS('#f59e0b'), fontSize:12, padding:'7px 14px' }}>View Pending</button>
+      {/* Stats */}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:14, marginBottom:20 }}>
+        {[
+          ['Total Bookings', rows.length, '#6366f1'],
+          ['Revenue (Gross)', fmt(totalRevenue), '#22c55e'],
+          ['Platform Commission (10%)', fmt(totalCommission), '#f59e0b'],
+          ['Pending Payments', pendingCount, '#ef4444'],
+        ].map(([l,v,c]) => (
+          <div key={l} style={{ background:'#1e293b', borderRadius:12, padding:'16px 18px', border:'1px solid #334155' }}>
+            <p style={{ color:'#64748b', fontSize:11, fontWeight:600, marginBottom:6 }}>{l}</p>
+            <p style={{ color:c, fontSize:22, fontWeight:900 }}>{v}</p>
           </div>
-        )}
+        ))}
+      </div>
 
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:16, marginBottom:24 }}>
-          {[
-            ['Total Transactions', payments.length, '#6366f1'],
-            ['Total Collected', INR(totalPaid), '#10b981'],
-            ['Pending Verification', `${pendingCount} (${INR(totalPending)})`, '#f59e0b'],
-            ['Commission (10%)', INR(commission), '#8b5cf6']
-          ].map(([l,v,c])=>(
-            <div key={l} style={{ background:'#fff', borderRadius:10, padding:'16px 20px', boxShadow:'0 1px 3px rgba(0,0,0,0.08)', borderLeft:`4px solid ${c}` }}>
-              <div style={{ fontSize:12, color:'#64748b', fontWeight:600, marginBottom:6 }}>{l}</div>
-              <div style={{ fontSize:l==='Total Transactions'?28:20, fontWeight:800, color:'#0f172a' }}>{v}</div>
-            </div>
-          ))}
+      {/* Filters */}
+      <div style={{ display:'flex', gap:10, marginBottom:16, flexWrap:'wrap' }}>
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search customer, service, city..."
+          style={{ flex:1, minWidth:200, background:'#1e293b', border:'1px solid #334155', borderRadius:10, padding:'8px 14px', color:'#e2e8f0', fontSize:13, outline:'none', fontFamily:'inherit' }} />
+        {['all','completed','pending','cancelled'].map(f => (
+          <button key={f} onClick={() => setFilter(f)}
+            style={{ padding:'8px 14px', borderRadius:10, border:'1.5px solid '+(filter===f?'#6366f1':'#334155'), background:filter===f?'#6366f1':'#1e293b', color:filter===f?'#fff':'#94a3b8', fontSize:12, fontWeight:700, cursor:'pointer', fontFamily:'inherit', textTransform:'capitalize' }}>
+            {f}
+          </button>
+        ))}
+      </div>
+
+      {/* Table */}
+      {loading ? (
+        <div style={{ display:'flex', justifyContent:'center', padding:60 }}>
+          <div style={{ width:32, height:32, border:'3px solid #1e293b', borderTop:'3px solid #6366f1', borderRadius:'50%', animation:'spin .8s linear infinite' }} />
+          <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
         </div>
-
-        <div style={{ background:'#fff', borderRadius:12, boxShadow:'0 1px 3px rgba(0,0,0,0.08)', overflow:'hidden' }}>
-          <div style={{ padding:'16px 20px', borderBottom:'1px solid #e2e8f0', display:'flex', gap:10, alignItems:'center', flexWrap:'wrap' }}>
-            <input
-              value={search}
-              onChange={e=>setSearch(e.target.value)}
-              placeholder="Search customer, payment ID, service..."
-              style={{ padding:'9px 14px', border:'1px solid #e2e8f0', borderRadius:8, fontSize:14, width:280, outline:'none' }}
-            />
-            {['all','pending','paid','failed','refunded'].map(f=>(
-              <button key={f} onClick={()=>setFilter(f)} style={{ padding:'7px 10px', borderRadius:7, border:'none', cursor:'pointer', fontSize:12, fontWeight:600, background:filter===f?'#6366f1':'#f1f5f9', color:filter===f?'#fff':'#64748b', textTransform:'capitalize', position:'relative' }}>
-                {f}
-                {f==='pending'&&pendingCount>0 && <span style={{ position:'absolute', top:-6, right:-6, background:'#ef4444', color:'#fff', borderRadius:'50%', width:16, height:16, fontSize:10, display:'flex', alignItems:'center', justifyContent:'center', fontWeight:700 }}>{pendingCount}</span>}
-              </button>
-            ))}
-          </div>
-          {loading ? <Loader /> : (
-            <div style={{ overflowX:'auto' }}>
-              <table style={{ width:'100%', borderCollapse:'collapse' }}>
-                <thead><tr>{['Booking ID','Customer','Worker','Service','Amount','Method','Payment Ref','Status','Date','Actions'].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
-                <tbody>
-                  {filtered.map(p=>(
-                    <tr key={p.id} onMouseEnter={e=>e.currentTarget.style.background='#f8fafc'} onMouseLeave={e=>e.currentTarget.style.background='#fff'}>
-                      <td style={td}><span style={{ fontFamily:'monospace', fontSize:12, color:'#6366f1' 
+      ) : (
+        <div style={{ background:'#1e293b', borderRadius:14, border:'1px solid #334155', overflowX:'auto' }}>
+          <table style={{ width:'100%', borderCollapse:'collapse' }}>
+            <thead>
+              <tr>
+                {['Date','Service','Customer','City','Amount','Worker Payout (90%)','Status','Payment'].map(h => (
+                  <th key={h} style={th}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.length === 0 && (
+                <tr><td colSpan={8} style={{ ...td, textAlign:'center', color:'#475569', padding:40 }}>No records found</td></tr>
+              )}
+              {filtered.map(r => (
+                <tr key={r.id} style={{ cursor:'default' }}>
+                  <td style={td}>{fmtDate(r.created_at)}</td>
+                  <td style={td}>{r.service || '—'}</td>
+                  <td style={td}>{r.customer_name || '—'}</td>
+                  <td style={td}>{r.city || '—'}</td>
+                  <td style={td}><span style={{ fontFamily:'monospace', fontSize:12, color:'#6366f1', fontWeight:700 }}>{fmt(r.amount)}</span></td>
+                  <td style={td}><span style={{ fontFamily:'monospace', fontSize:12, color:'#22c55e', fontWeight:700 }}>{fmt(Math.round((r.amount||0)*0.9))}</span></td>
+                  <td style={td}>{badge(r.status)}</td>
+                  <td style={td}>{badge(r.payment_status||'pending')}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div style={{ padding:'10px 14px', color:'#475569', fontSize:12 }}>{filtered.length} records</div>
+        </div>
+      )}
+    </div>
+  )
+}

@@ -3,7 +3,6 @@ import { sb } from './lib/supabase'
 import Login   from './pages/Login'
 import Sidebar from './components/Sidebar'
 
-// ── Lazy-loaded pages (code splitting) ───────────────────────────────────────
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const Users     = lazy(() => import('./pages/Users'))
 const Workers   = lazy(() => import('./pages/Workers'))
@@ -41,4 +40,23 @@ export default function App() {
 
   if (!checked) return (
     <div style={{ height:'100vh', display:'flex', alignItems:'center', justifyContent:'center', background:'#0f172a' }}>
-      <div style={{ width:40, height:40, border:'3px solid #334155', bord
+      <div style={{ width:40, height:40, border:'3px solid #334155', borderTop:'3px solid #6366f1', borderRadius:'50%', animation:'spin 0.8s linear infinite' }} />
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+    </div>
+  )
+
+  if (!user) return <Login onLogin={setUser} />
+
+  const pages = { dashboard:<Dashboard />, users:<Users />, workers:<Workers />, bookings:<Bookings />, payments:<Payments />, payouts:<Payouts />, support:<Support />, reports:<Reports />, logs:<Logs /> }
+
+  return (
+    <div style={{ display:'flex', height:'100vh', background:'#f1f5f9', overflow:'hidden' }}>
+      <Sidebar page={page} setPage={setPage} user={user} onLogout={() => sb.auth.signOut()} />
+      <main style={{ flex:1, overflowY:'auto' }}>
+        <Suspense fallback={<PageLoader />}>
+          {pages[page] || <Dashboard />}
+        </Suspense>
+      </main>
+    </div>
+  )
+}
