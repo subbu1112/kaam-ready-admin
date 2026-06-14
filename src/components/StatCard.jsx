@@ -1,35 +1,15 @@
-export default function StatCard({ ico, label, value, sub, color = '#F5C000', trend }) {
+export default function StatCard({ label, value, sub, color='#6366f1', icon, trend }) {
+  const colors = { indigo:'#6366f1', green:'#10b981', amber:'#f59e0b', red:'#ef4444', blue:'#3b82f6', purple:'#8b5cf6' }
+  const c = colors[color] || color
   return (
-    <div style={{
-      background:'#1E293B', border:'1px solid #334155', borderRadius:16,
-      padding:'20px 22px', display:'flex', flexDirection:'column', gap:10
-    }}>
-      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-        <div style={{
-          width:44, height:44, borderRadius:12,
-          background: color + '20', display:'flex',
-          alignItems:'center', justifyContent:'center', fontSize:22
-        }}>
-          {ico}
-        </div>
-        {trend !== undefined && (
-          <span style={{
-            fontSize:12, fontWeight:700, color: trend >= 0 ? '#22c55e' : '#ef4444',
-            background: trend >= 0 ? '#dcfce7' : '#fee2e2',
-            padding:'3px 8px', borderRadius:6
-          }}>
-            {trend >= 0 ? '▲' : '▼'} {Math.abs(trend)}%
-          </span>
-        )}
+    <div style={{ background:'#fff', borderRadius:12, padding:'20px 24px', boxShadow:'0 1px 3px rgba(0,0,0,0.08)', display:'flex', alignItems:'flex-start', gap:16, minWidth:0 }}>
+      <div style={{ width:48, height:48, borderRadius:12, background:c+'15', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+        <span style={{ fontSize:22 }}>{icon}</span>
       </div>
-      <div>
-        <div style={{ color:'#94A3B8', fontSize:12, fontWeight:500, textTransform:'uppercase', letterSpacing:'.5px' }}>
-          {label}
-        </div>
-        <div style={{ color:'#F1F5F9', fontSize:28, fontWeight:800, lineHeight:1.2, marginTop:4 }}>
-          {value}
-        </div>
-        {sub && <div style={{ color:'#475569', fontSize:12, marginTop:4 }}>{sub}</div>}
+      <div style={{ flex:1, minWidth:0 }}>
+        <div style={{ fontSize:12, color:'#64748b', fontWeight:600, textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:4 }}>{label}</div>
+        <div style={{ fontSize:28, fontWeight:800, color:'#0f172a', lineHeight:1 }}>{value}</div>
+        {sub && <div style={{ fontSize:12, color: trend === 'up' ? '#10b981' : trend === 'down' ? '#ef4444' : '#64748b', marginTop:4, fontWeight:500 }}>{sub}</div>}
       </div>
     </div>
   )

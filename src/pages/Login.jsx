@@ -1,90 +1,52 @@
 import { useState } from 'react'
 import { sb } from '../lib/supabase'
 
-const Y = '#F5C000'
+export default function Login({ onLogin }) {
+  const [email, setEmail] = useState('')
+  const [pass,  setPass]  = useState('')
+  const [err,   setErr]   = useState('')
+  const [loading, setLoading] = useState(false)
 
-export default function LoginPage({ onLogin, showToast }) {
-  const [email,    setEmail]    = useState('')
-  const [password, setPassword] = useState('')
-  const [loading,  setLoading]  = useState(false)
-
-  async function handleLogin(e) {
+  async function handleSubmit(e) {
     e.preventDefault()
-    setLoading(true)
-    const { data, error } = await sb.auth.signInWithPassword({ email, password })
-    if (error) {
-      showToast(error.message, 'error')
-    } else {
-      onLogin(data.session)
-    }
+    setErr(''); setLoading(true)
+    const ADMIN = import.meta.env.VITE_ADMIN_EMAIL || 'admin@kaamready.in'
+    if (email.toLowerCase().trim() !== ADMIN) { setErr('Not an admin account'); setLoading(false); return }
+    const { error } = await sb.auth.signInWithPassword({ email: email.trim(), password: pass })
+    if (error) setErr(error.message)
+    else onLogin()
     setLoading(false)
   }
 
-  return (
-    <div style={{
-      display:'flex', alignItems:'center', justifyContent:'center',
-      height:'100vh', background:'#0F172A'
-    }}>
-      <div style={{
-        background:'#1E293B', borderRadius:20, padding:'48px 40px',
-        width:420, boxShadow:'0 24px 64px rgba(0,0,0,.5)',
-        border:'1px solid #334155'
-      }}>
-        {/* Logo */}
-        <div style={{ textAlign:'center', marginBottom:36 }}>
-          <div style={{ fontSize:40, marginBottom:8 }}>⚡</div>
-          <h1 style={{ color:'#fff', fontSize:24, fontWeight:800, margin:0 }}>KaamReady Admin</h1>
-          <p style={{ color:'#64748B', fontSize:14, marginTop:6 }}>Sign in to your control center</p>
-        </div>
+  const inp = { width:'100%', padding:'12px 14px', border:'1px solid #e2e8f0', borderRadius:10, fontSize:14, outline:'none', transition:'border 0.2s' }
 
-        <form onSubmit={handleLogin}>
-          <label style={{ display:'block', color:'#94A3B8', fontSize:12, fontWeight:600, marginBottom:6, textTransform:'uppercase', letterSpacing:'.5px' }}>
-            Email
-          </label>
-          <input
-            type="email" value={email} onChange={e => setEmail(e.target.value)}
-            required placeholder="admin@kaamready.in"
-            style={{
-              width:'100%', border:'1.5px solid #334155', borderRadius:10,
-              padding:'12px 14px', fontSize:14, outline:'none', fontFamily:'inherit',
-              background:'#0F172A', color:'#F1F5F9', marginBottom:18,
-              transition:'border-color .2s'
-            }}
-            onFocus={e => e.target.style.borderColor = Y}
-            onBlur={e => e.target.style.borderColor = '#334155'}
-          />
-          <label style={{ display:'block', color:'#94A3B8', fontSize:12, fontWeight:600, marginBottom:6, textTransform:'uppercase', letterSpacing:'.5px' }}>
-            Password
-          </label>
-          <input
-            type="password" value={password} onChange={e => setPassword(e.target.value)}
-            required placeholder="••••••••"
-            style={{
-              width:'100%', border:'1.5px solid #334155', borderRadius:10,
-              padding:'12px 14px', fontSize:14, outline:'none', fontFamily:'inherit',
-              background:'#0F172A', color:'#F1F5F9', marginBottom:28,
-              transition:'border-color .2s'
-            }}
-            onFocus={e => e.target.style.borderColor = Y}
-            onBlur={e => e.target.style.borderColor = '#334155'}
-          />
-          <button
-            type="submit" disabled={loading}
-            style={{
-              width:'100%', background:Y, border:'none', borderRadius:12,
-              padding:14, fontSize:15, fontWeight:800, cursor:'pointer',
-              fontFamily:'inherit', opacity: loading ? 0.7 : 1,
-              transition:'opacity .2s, transform .1s',
-              color:'#0F172A'
-            }}
-          >
-            {loading ? 'Signing in...' : 'Sign In →'}
+  return (
+    <div style={{ minHeight:'100vh', background:'linear-gradient(135deg,#0f172a 0%,#1e293b 100%)', display:'flex', alignItems:'center', justifyContent:'center' }}>
+      <div style={{ background:'#fff', borderRadius:20, padding:40, width:400, boxShadow:'0 25px 50px rgba(0,0,0,0.3)' }}>
+        <div style={{ textAlign:'center', marginBottom:32 }}>
+          <div style={{ width:56, height:56, background:'#6366f1', borderRadius:16, display:'flex', alignItems:'center', justifyContent:'center', margin:'0 auto 16px' }}>
+            <span style={{ color:'#fff', fontWeight:900, fontSize:24 }}>K</span>
+          </div>
+          <h1 style={{ fontSize:24, fontWeight:800, color:'#0f172a' }}>KaamReady Admin</h1>
+          <p style={{ color:'#64748b', marginTop:4, fontSize:14 }}>Control Center — Authorized Access Only</p>
+        </div>
+        <form onSubmit={handleSubmit}>
+          <div style={{ marginBottom:16 }}>
+            <label style={{ fontSize:13, fontWeight:600, color:'#374151', display:'block', marginBottom:6 }}>Admin Email</label>
+            <input style={inp} type="email" placeholder="admin@kaamready.in" value={email} onChange={e=>setEmail(e.target.value)} required />
+          </div>
+          <div style={{ marginBottom:24 }}>
+            <label style={{ fontSize:13, fontWeight:600, color:'#374151', display:'block', marginBottom:6 }}>Password</label>
+            <input style={inp} type="password" placeholder="••••••••" value={pass} onChange={e=>setPass(e.target.value)} required />
+          </div>
+          {err && <div style={{ background:'#fee2e2', color:'#991b1b', padding:'10px 14px', borderRadius:8, fontSize:13, marginBottom:16 }}>{err}</div>}
+          <button type="submit" disabled={loading} style={{
+            width:'100%', padding:'13px', background:'#6366f1', color:'#fff', border:'none',
+            borderRadius:10, fontWeight:700, fontSize:15, cursor:'pointer', opacity: loading ? 0.7 : 1
+          }}>
+            {loading ? 'Signing in...' : 'Sign In to Admin Panel'}
           </button>
         </form>
-
-        <p style={{ textAlign:'center', color:'#475569', fontSize:12, marginTop:24 }}>
-          KaamReady Platform · Admin v1.0 · Karnataka 🇮🇳
-        </p>
       </div>
     </div>
   )

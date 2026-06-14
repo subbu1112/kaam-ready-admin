@@ -1,238 +1,176 @@
 import { useState, useEffect } from 'react'
 import { sb } from '../lib/supabase'
-import DataTable from '../components/DataTable'
+import TopBar from '../components/TopBar'
+import Badge from '../components/Badge'
+import Modal from '../components/Modal'
+import Loader from '../components/Loader'
+import { exportCSV, exportExcel } from '../lib/export'
 
-const Y = '#F5C000'
+const fmt = d => d ? new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '-'
+const INR = v => 'Rs.' + (v||0).toLocaleString('en-IN')
 
-const STATUS_COLORS = {
-  pending:   { bg:'#fef3c720', color:'#d97706' },
-  approved:  { bg:'#dcfce720', color:'#16a34a' },
-  rejected:  { bg:'#fee2e220', color:'#dc2626' },
-  suspended: { bg:'#f3f4f620', color:'#6b7280' },
+function btnS(bg,size='md') {
+  return { background:bg, color:'#fff', border:'none', borderRadius:size==='sm'?6:8, padding:size==='sm'?'5px 10px':'9px 16px', fontSize:size==='sm'?12:13, fontWeight:600, cursor:'pointer', whiteSpace:'nowrap' }
 }
 
-function StatusBadge({ status }) {
-  const s = STATUS_COLORS[status] || STATUS_COLORS.pending
-  return (
-    <span style={{
-      background: s.bg, color: s.color,
-      fontSize:11, fontWeight:700, padding:'4px 9px', borderRadius:6, textTransform:'capitalize'
-    }}>{status || 'pending'}</span>
-  )
-}
-
-export default function Workers({ showToast }) {
-  const [workers,  setWorkers]  = useState([])
-  const [loading,  setLoading]  = useState(true)
-  const [filter,   setFilter]   = useState('all')  // all | pending | approved | rejected
-  const [search,   setSearch]   = useState('')
+export default function Workers() {
+  const [workers, setWorkers] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [search, setSearch] = useState('')
+  const [filter, setFilter] = useState('all')
+  const [kycFilter, setKycFilter] = useState('all')
   const [selected, setSelected] = useState(null)
-  const [kyc,      setKyc]      = useState(null)
+  const [bookings, setBookings] = useState([])
+  const [saving, setSaving] = useState(false)
 
   useEffect(() => { load() }, [])
 
   async function load() {
     setLoading(true)
-    const { data, error } = await sb
-      .from('workers')
-      .select('id, name, phone, skill, city, is_online, kyc_status, rating, total_jobs, price_min, upi_id, created_at, aadhaar_front_url, aadhaar_back_url')
-      .order('created_at', { ascending: false })
-    if (error) showToast(error.message, 'error')
-    else setWorkers(data || [])
+    const { data } = await sb.from('workers').select('*').order('created_at', { ascending: false })
+    setWorkers(data || [])
     setLoading(false)
   }
 
-  async function approve(id) {
-    const { error } = await sb.from('workers').update({ kyc_status:'approved' }).eq('id', id)
-    if (error) { showToast('Error: ' + error.message, 'error'); return }
-    showToast('Worker approved ✓')
-    setSelected(w => w?.id === id ? {...w, kyc_status:'approved'} : w)
-    setWorkers(ws => ws.map(w => w.id === id ? {...w, kyc_status:'approved'} : w))
+  async function openWorker(w) {
+    setSelected(w)
+    const { data } = await sb.from('bookings').select('*').eq('worker_id', w.id).order('created_at', { ascending: false })
+    setBookings(data || [])
   }
 
-  async function reject(id) {
-    const { error } = await sb.from('workers').update({ kyc_status:'rejected' }).eq('id', id)
-    if (error) { showToast('Error: ' + error.message, 'error'); return }
-    showToast('Worker rejected')
-    setSelected(w => w?.id === id ? {...w, kyc_status:'rejected'} : w)
-    setWorkers(ws => ws.map(w => w.id === id ? {...w, kyc_status:'rejected'} : w))
+  async function updateKYC(id, status) {
+    setSaving(true)
+    await sb.from('workers').update({ kyc_status: status, aadhar_verified: status === 'approved', aadhaar_verified: status === 'approved' }).eq('id', id)
+    await load()
+    setSaving(false)
+    setSelected(s => s ? { ...s, kyc_status: status } : null)
   }
 
-  async function suspend(id) {
-    const { error } = await sb.from('workers').update({ kyc_status:'suspended', is_online: false }).eq('id', id)
-    if (error) { showToast('Error: ' + error.message, 'error'); return }
-    showToast('Worker suspended')
-    setSelected(null)
-    setWorkers(ws => ws.map(w => w.id === id ? {...w, kyc_status:'suspended', is_online:false} : w))
-  }
-
-  async function loadKyc(worker) {
-    if (!worker.aadhaar_front_url && !worker.aadhaar_back_url) {
-      showToast('No KYC documents uploaded', 'error'); return
-    }
-    // Get signed URLs for KYC images
-    const signed = {}
-    for (const [k, path] of [['front', worker.aadhaar_front_url], ['back', worker.aadhaar_back_url]]) {
-      if (!path) continue
-      const { data } = await sb.storage.from('kyc').createSignedUrl(path.split('/kyc/')[1] || path, 3600)
-      if (data?.signedUrl) signed[k] = data.signedUrl
-    }
-    setKyc(signed)
+  async function updateStatus(id, status) {
+    setSaving(true)
+    await sb.from('workers').update({ account_status: status }).eq('id', id)
+    await load()
+    setSaving(false)
+    setSelected(s => s ? { ...s, account_status: status } : null)
   }
 
   const filtered = workers.filter(w => {
-    if (filter !== 'all' && (w.kyc_status || 'pending') !== filter) return false
     const q = search.toLowerCase()
-    return !q || (w.name||'').toLowerCase().includes(q)
-      || (w.phone||'').includes(q)
-      || (w.skill||'').toLowerCase().includes(q)
-      || (w.city||'').toLowerCase().includes(q)
+    const matchQ = !q || (w.name||'').toLowerCase().includes(q) || (w.phone||'').includes(q) || (w.skill||'').toLowerCase().includes(q)
+    const matchF = filter === 'all' || (w.account_status||'active') === filter
+    const matchK = kycFilter === 'all' || (w.kyc_status||'pending') === kycFilter
+    return matchQ && matchF && matchK
   })
 
-  const counts = {
-    all:      workers.length,
-    pending:  workers.filter(w => !w.kyc_status || w.kyc_status==='pending').length,
-    approved: workers.filter(w => w.kyc_status==='approved').length,
-    rejected: workers.filter(w => w.kyc_status==='rejected').length,
-  }
-
-  const columns = [
-    { key:'name',       label:'Name',      render: v => <span style={{ color:'#F1F5F9', fontWeight:600 }}>{v || '—'}</span> },
-    { key:'phone',      label:'Phone',     render: v => <span style={{ fontFamily:'monospace' }}>{v || '—'}</span> },
-    { key:'skill',      label:'Skill',     render: v => <span style={{ color:Y, fontWeight:600 }}>{v || '—'}</span> },
-    { key:'city',       label:'City'       },
-    { key:'kyc_status', label:'KYC',       render: v => <StatusBadge status={v || 'pending'} /> },
-    { key:'is_online',  label:'Status',    render: v => <span style={{ color: v ? '#22c55e' : '#475569', fontWeight:600, fontSize:12 }}>{v ? '● Online' : '○ Offline'}</span> },
-    { key:'rating',     label:'Rating',    render: v => v ? `⭐ ${Number(v).toFixed(1)}` : '—' },
-    { key:'total_jobs', label:'Jobs'       },
-  ]
+  const th = { padding:'10px 16px', textAlign:'left', fontSize:12, fontWeight:700, color:'#64748b', textTransform:'uppercase', letterSpacing:'0.5px', background:'#f8fafc', borderBottom:'1px solid #e2e8f0' }
+  const td = { padding:'12px 16px', fontSize:14, color:'#1e293b', borderBottom:'1px solid #f1f5f9' }
 
   return (
-    <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
-      {/* Tabs */}
-      <div style={{ display:'flex', gap:8 }}>
-        {['all','pending','approved','rejected'].map(f => (
-          <button key={f} onClick={() => setFilter(f)}
-            style={{
-              padding:'8px 16px', borderRadius:8, border:'none', cursor:'pointer', fontFamily:'inherit',
-              fontSize:13, fontWeight:600,
-              background: filter===f ? Y : '#1E293B',
-              color: filter===f ? '#0F172A' : '#64748B'
-            }}>
-            {f.charAt(0).toUpperCase()+f.slice(1)} ({counts[f] ?? 0})
-          </button>
-        ))}
-        <div style={{ flex:1 }} />
-        <input
-          placeholder="Search name, skill, city…"
-          value={search} onChange={e => setSearch(e.target.value)}
-          style={{
-            background:'#1E293B', border:'1px solid #334155', borderRadius:8,
-            padding:'8px 14px', color:'#F1F5F9', fontSize:13, outline:'none',
-            fontFamily:'inherit', width:220
-          }}
-        />
-        <button onClick={load} style={{
-          background:'#334155', border:'none', borderRadius:8, padding:'8px 14px',
-          color:'#94A3B8', cursor:'pointer', fontFamily:'inherit', fontSize:13
-        }}>↻</button>
-      </div>
-
-      <div style={{ background:'#1E293B', border:'1px solid #334155', borderRadius:16, overflow:'hidden' }}>
-        <DataTable columns={columns} rows={filtered} loading={loading}
-          emptyMsg="No workers found" onRowClick={setSelected} />
-      </div>
-
-      {/* Worker detail modal */}
-      {selected && (
-        <div style={{
-          position:'fixed', inset:0, background:'rgba(0,0,0,.75)', zIndex:999,
-          display:'flex', alignItems:'center', justifyContent:'center', padding:20
-        }} onClick={() => { setSelected(null); setKyc(null) }}>
-          <div style={{
-            background:'#1E293B', border:'1px solid #334155', borderRadius:20,
-            padding:32, width:520, maxHeight:'90vh', overflowY:'auto',
-            boxShadow:'0 24px 64px rgba(0,0,0,.5)'
-          }} onClick={e => e.stopPropagation()}>
-            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:24 }}>
-              <div>
-                <h2 style={{ color:'#F1F5F9', fontWeight:700, fontSize:18, margin:0 }}>🔧 Worker Profile</h2>
-                <StatusBadge status={selected.kyc_status || 'pending'} />
-              </div>
-              <button onClick={() => { setSelected(null); setKyc(null) }}
-                style={{ background:'#334155', border:'none', borderRadius:8, color:'#94A3B8', padding:'6px 12px', cursor:'pointer', fontFamily:'inherit' }}>
-                ✕
-              </button>
+    <div>
+      <TopBar title="Worker Management" subtitle={`${workers.length} registered workers`} actions={
+        <div style={{ display:'flex', gap:8 }}>
+          <button onClick={()=>exportCSV(filtered.map(w=>({Name:w.name,Phone:w.phone,Skill:w.skill,City:w.city,Rating:w.rating,Jobs:w.total_jobs,KYC:w.kyc_status,Status:w.account_status||'active'})),'workers')} style={btnS('#10b981')}>CSV</button>
+          <button onClick={()=>exportExcel(filtered.map(w=>({Name:w.name,Phone:w.phone,Skill:w.skill,City:w.city,Rating:w.rating,Jobs:w.total_jobs,KYC:w.kyc_status,Status:w.account_status||'active'})),'workers','Workers')} style={btnS('#3b82f6')}>Excel</button>
+        </div>
+      } />
+      <div style={{ padding:32 }}>
+        <div style={{ background:'#fff', borderRadius:12, boxShadow:'0 1px 3px rgba(0,0,0,0.08)', overflow:'hidden' }}>
+          <div style={{ padding:'16px 20px', borderBottom:'1px solid #e2e8f0', display:'flex', gap:10, alignItems:'center', flexWrap:'wrap' }}>
+            <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search name, phone, skill..." style={{ padding:'9px 14px', border:'1px solid #e2e8f0', borderRadius:8, fontSize:14, width:240, outline:'none' }} />
+            <div style={{ display:'flex', gap:6 }}>
+              {['all','active','suspended'].map(f=>(
+                <button key={f} onClick={()=>setFilter(f)} style={{ padding:'7px 12px', borderRadius:7, border:'none', cursor:'pointer', fontSize:12, fontWeight:600, background:filter===f?'#6366f1':'#f1f5f9', color:filter===f?'#fff':'#64748b', textTransform:'capitalize' }}>{f}</button>
+              ))}
             </div>
-
-            {/* Details */}
-            {[
-              ['Name',     selected.name    || '—'],
-              ['Phone',    selected.phone   || '—'],
-              ['Skill',    selected.skill   || '—'],
-              ['City',     selected.city    || '—'],
-              ['Rating',   selected.rating ? `${selected.rating} ⭐` : '—'],
-              ['Jobs Done',selected.total_jobs || 0],
-              ['Min Price','₹' + (selected.price_min || 0)],
-              ['UPI ID',   selected.upi_id  || 'Not set'],
-              ['Joined',   selected.created_at ? new Date(selected.created_at).toLocaleString('en-IN') : '—'],
-            ].map(([k,v]) => (
-              <div key={k} style={{ display:'flex', gap:12, padding:'9px 0', borderBottom:'1px solid #334155' }}>
-                <span style={{ color:'#64748B', fontSize:13, minWidth:90 }}>{k}</span>
-                <span style={{ color:'#F1F5F9', fontSize:13, fontWeight:500 }}>{v}</span>
+            <div style={{ display:'flex', gap:6 }}>
+              {['all','pending','approved','rejected'].map(f=>(
+                <button key={f} onClick={()=>setKycFilter(f)} style={{ padding:'7px 12px', borderRadius:7, border:'none', cursor:'pointer', fontSize:12, fontWeight:600, background:kycFilter===f?'#f59e0b':'#f1f5f9', color:kycFilter===f?'#fff':'#64748b', textTransform:'capitalize' }}>KYC: {f}</button>
+              ))}
+            </div>
+            <span style={{ marginLeft:'auto', fontSize:13, color:'#64748b' }}>{filtered.length} results</span>
+          </div>
+          {loading ? <Loader /> : (
+            <div style={{ overflowX:'auto' }}>
+              <table>
+                <thead><tr>
+                  {['Worker','Phone','Skill','City','Rating','Jobs','KYC','Status','Online','Actions'].map(h=><th key={h} style={th}>{h}</th>)}
+                </tr></thead>
+                <tbody>
+                  {filtered.map(w=>(
+                    <tr key={w.id} style={{ cursor:'pointer' }} onMouseEnter={e=>e.currentTarget.style.background='#f8fafc'} onMouseLeave={e=>e.currentTarget.style.background='#fff'}>
+                      <td style={td}><div style={{ fontWeight:600 }}>{w.name||'No name'}</div><div style={{ fontSize:11, color:'#94a3b8' }}>{w.id.slice(0,8)}...</div></td>
+                      <td style={td}>{w.phone||'-'}</td>
+                      <td style={td}>{w.skill||'-'}</td>
+                      <td style={td}>{w.city||'-'}</td>
+                      <td style={td}><span style={{ fontWeight:700, color:'#f59e0b' }}>{w.rating||5} ★</span></td>
+                      <td style={td}>{w.total_jobs||0}</td>
+                      <td style={td}><Badge status={w.kyc_status||'pending'} /></td>
+                      <td style={td}><Badge status={w.account_status||'active'} /></td>
+                      <td style={td}><span style={{ width:8, height:8, borderRadius:'50%', background:w.is_online?'#10b981':'#cbd5e1', display:'inline-block' }} /></td>
+                      <td style={td}>
+                        <div style={{ display:'flex', gap:4, flexWrap:'wrap' }}>
+                          <button onClick={()=>openWorker(w)} style={btnS('#6366f1','sm')}>View</button>
+                          {w.kyc_status==='pending' && <>
+                            <button onClick={()=>updateKYC(w.id,'approved')} style={btnS('#10b981','sm')}>Approve</button>
+                            <button onClick={()=>updateKYC(w.id,'rejected')} style={btnS('#ef4444','sm')}>Reject</button>
+                          </>}
+                          {(w.account_status||'active')==='active' ? <button onClick={()=>updateStatus(w.id,'suspended')} style={btnS('#f59e0b','sm')}>Suspend</button> : <button onClick={()=>updateStatus(w.id,'active')} style={btnS('#10b981','sm')}>Restore</button>}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {!filtered.length && <div style={{ padding:40, textAlign:'center', color:'#94a3b8' }}>No workers found</div>}
+            </div>
+          )}
+        </div>
+      </div>
+      {selected && (
+        <Modal title={`Worker: ${selected.name||'No name'}`} onClose={()=>setSelected(null)} width={750}>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12, marginBottom:20 }}>
+            {[['Phone',selected.phone],['Skill',selected.skill],['City',selected.city],['Rating',`${selected.rating||5} / 5`],['Total Jobs',selected.total_jobs||0],['Wallet',INR(selected.wallet_balance)],['UPI ID',selected.upi_id||'-'],['Bank',selected.bank_account||'-'],['IFSC',selected.bank_ifsc||'-'],['KYC Status',selected.kyc_status||'pending'],['Joined',fmt(selected.created_at)]].map(([l,v])=>(
+              <div key={l} style={{ background:'#f8fafc', borderRadius:8, padding:'10px 14px' }}>
+                <div style={{ fontSize:11, color:'#64748b', fontWeight:600, marginBottom:3 }}>{l}</div>
+                <div style={{ fontWeight:700, fontSize:13 }}>{v||'-'}</div>
               </div>
             ))}
-
-            {/* KYC docs */}
-            <div style={{ marginTop:20 }}>
-              <button onClick={() => loadKyc(selected)}
-                style={{
-                  background:'#334155', border:'none', borderRadius:8, padding:'9px 18px',
-                  color:'#94A3B8', cursor:'pointer', fontFamily:'inherit', fontSize:13, marginBottom:14
-                }}>
-                📄 View KYC Documents
-              </button>
-              {kyc && (
-                <div style={{ display:'flex', gap:12 }}>
-                  {kyc.front && (
-                    <div style={{ flex:1 }}>
-                      <p style={{ color:'#64748B', fontSize:11, marginBottom:6 }}>AADHAAR FRONT</p>
-                      <img src={kyc.front} alt="Aadhaar Front"
-                        style={{ width:'100%', borderRadius:8, border:'1px solid #334155' }} />
-                    </div>
-                  )}
-                  {kyc.back && (
-                    <div style={{ flex:1 }}>
-                      <p style={{ color:'#64748B', fontSize:11, marginBottom:6 }}>AADHAAR BACK</p>
-                      <img src={kyc.back} alt="Aadhaar Back"
-                        style={{ width:'100%', borderRadius:8, border:'1px solid #334155' }} />
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Actions */}
-            <div style={{ display:'flex', gap:10, marginTop:24 }}>
-              {selected.kyc_status !== 'approved' && (
-                <button onClick={() => approve(selected.id)}
-                  style={{ flex:1, background:'#16a34a', color:'#fff', border:'none', borderRadius:10, padding:12, fontWeight:700, cursor:'pointer', fontFamily:'inherit', fontSize:14 }}>
-                  ✓ Approve KYC
-                </button>
-              )}
-              {selected.kyc_status !== 'rejected' && (
-                <button onClick={() => reject(selected.id)}
-                  style={{ flex:1, background:'#dc2626', color:'#fff', border:'none', borderRadius:10, padding:12, fontWeight:700, cursor:'pointer', fontFamily:'inherit', fontSize:14 }}>
-                  ✗ Reject KYC
-                </button>
-              )}
-              <button onClick={() => suspend(selected.id)}
-                style={{ background:'#334155', color:'#94A3B8', border:'none', borderRadius:10, padding:'12px 16px', fontWeight:700, cursor:'pointer', fontFamily:'inherit', fontSize:14 }}>
-                ⊘ Suspend
-              </button>
-            </div>
           </div>
-        </div>
+          {(selected.aadhar_front_url||selected.aadhaar_front_url||selected.selfie_url) && (
+            <div style={{ marginBottom:20 }}>
+              <h4 style={{ fontWeight:700, marginBottom:10 }}>Documents</h4>
+              <div style={{ display:'flex', gap:12, flexWrap:'wrap' }}>
+                {[['Aadhaar Front',selected.aadhar_front_url||selected.aadhaar_front_url],['Aadhaar Back',selected.aadhar_back_url||selected.aadhaar_back_url],['Selfie',selected.selfie_url]].filter(([,url])=>url).map(([label,url])=>(
+                  <a key={label} href={url} target="_blank" rel="noreferrer" style={{ display:'block', background:'#f1f5f9', borderRadius:8, padding:'10px 16px', fontSize:13, color:'#6366f1', fontWeight:600, textDecoration:'none' }}>View {label}</a>
+                ))}
+              </div>
+            </div>
+          )}
+          <h4 style={{ fontWeight:700, marginBottom:10 }}>Job History ({bookings.length})</h4>
+          <div style={{ maxHeight:220, overflowY:'auto', border:'1px solid #e2e8f0', borderRadius:8, marginBottom:20 }}>
+            <table>
+              <thead><tr>{['Service','Status','Amount','Date'].map(h=><th key={h} style={{...th,background:'#fff'}}>{h}</th>)}</tr></thead>
+              <tbody>
+                {bookings.slice(0,20).map(b=>(
+                  <tr key={b.id}>
+                    <td style={td}>{b.service}</td>
+                    <td style={td}><Badge status={b.status} /></td>
+                    <td style={td}>{INR(b.amount)}</td>
+                    <td style={td}>{fmt(b.created_at)}</td>
+                  </tr>
+                ))}
+                {!bookings.length && <tr><td colSpan={4} style={{ padding:20, textAlign:'center', color:'#94a3b8' }}>No jobs yet</td></tr>}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ display:'flex', gap:8 }}>
+            {selected.kyc_status==='pending' && <>
+              <button disabled={saving} onClick={()=>updateKYC(selected.id,'approved')} style={btnS('#10b981')}>Approve KYC</button>
+              <button disabled={saving} onClick={()=>updateKYC(selected.id,'rejected')} style={btnS('#ef4444')}>Reject KYC</button>
+            </>}
+            {(selected.account_status||'active')==='active' ? <button disabled={saving} onClick={()=>updateStatus(selected.id,'suspended')} style={btnS('#f59e0b')}>Suspend Worker</button> : <button disabled={saving} onClick={()=>updateStatus(selected.id,'active')} style={btnS('#10b981')}>Restore Access</button>}
+          </div>
+        </Modal>
       )}
     </div>
   )

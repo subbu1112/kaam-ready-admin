@@ -1,139 +1,152 @@
 import { useState, useEffect } from 'react'
 import { sb } from '../lib/supabase'
-import DataTable from '../components/DataTable'
+import TopBar from '../components/TopBar'
+import Badge from '../components/Badge'
+import Modal from '../components/Modal'
+import Loader from '../components/Loader'
+import { exportCSV, exportExcel, exportPDF } from '../lib/export'
 
-const Y = '#F5C000'
+const INR = v => 'Rs.' + (v||0).toLocaleString('en-IN')
+const fmt = d => d ? new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '-'
 
-function Badge({ text, color = '#334155', bg = '#1E293B' }) {
-  return <span style={{ background: bg, color, fontSize:11, fontWeight:700, padding:'3px 8px', borderRadius:6 }}>{text}</span>
-}
-
-export default function Users({ showToast }) {
-  const [users,    setUsers]    = useState([])
-  const [loading,  setLoading]  = useState(true)
-  const [search,   setSearch]   = useState('')
+export default function Users() {
+  const [users, setUsers] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [search, setSearch] = useState('')
+  const [filter, setFilter] = useState('all')
   const [selected, setSelected] = useState(null)
-  const [page,     setPage]     = useState(0)
-  const PAGE_SIZE = 20
+  const [bookings, setBookings] = useState([])
+  const [saving, setSaving] = useState(false)
 
   useEffect(() => { load() }, [])
 
   async function load() {
     setLoading(true)
-    const { data, error } = await sb
-      .from('profiles')
-      .select('id, name, phone, email, city, created_at, address')
-      .order('created_at', { ascending: false })
-    if (error) showToast(error.message, 'error')
-    else setUsers(data || [])
+    const { data } = await sb.from('profiles').select('*').order('created_at', { ascending: false })
+    setUsers(data || [])
     setLoading(false)
+  }
+
+  async function openUser(u) {
+    setSelected(u)
+    const { data } = await sb.from('bookings').select('*').eq('user_id', u.id).order('created_at', { ascending: false })
+    setBookings(data || [])
+  }
+
+  async function updateStatus(id, status) {
+    setSaving(true)
+    await sb.from('profiles').update({ account_status: status }).eq('id', id)
+    await load()
+    setSelected(s => s ? { ...s, account_status: status } : null)
+    setSaving(false)
   }
 
   const filtered = users.filter(u => {
     const q = search.toLowerCase()
-    return !q || (u.name||'').toLowerCase().includes(q)
-      || (u.phone||'').includes(q)
-      || (u.email||'').toLowerCase().includes(q)
-      || (u.city||'').toLowerCase().includes(q)
+    const matchQ = !q || (u.name||'').toLowerCase().includes(q) || (u.phone||'').includes(q)
+    const matchF = filter === 'all' || (u.account_status || 'active') === filter
+    return matchQ && matchF
   })
 
-  const paginated = filtered.slice(page * PAGE_SIZE, (page+1) * PAGE_SIZE)
-  const totalPages = Math.ceil(filtered.length / PAGE_SIZE)
+  const th = { padding:'10px 16px', textAlign:'left', fontSize:12, fontWeight:700, color:'#64748b', textTransform:'uppercase', letterSpacing:'0.5px', background:'#f8fafc', borderBottom:'1px solid #e2e8f0' }
+  const td = { padding:'12px 16px', fontSize:14, color:'#1e293b', borderBottom:'1px solid #f1f5f9' }
 
-  const columns = [
-    { key:'name',       label:'Name',         render: v => <span style={{ color:'#F1F5F9', fontWeight:600 }}>{v || '—'}</span> },
-    { key:'phone',      label:'Phone',         render: v => <span style={{ fontFamily:'monospace' }}>{v || '—'}</span> },
-    { key:'email',      label:'Email',         render: v => v || '—' },
-    { key:'city',       label:'City',          render: v => v ? <Badge text={v} color="#3b82f6" bg="#eff6ff20" /> : '—' },
-    { key:'created_at', label:'Joined',        render: v => v ? new Date(v).toLocaleDateString('en-IN') : '—' },
-  ]
+  function doExport(type) {
+    const rows = filtered.map(u => ({ Name: u.name||'-', Phone: u.phone||'-', City: u.city||'-', Status: u.account_status||'active', Bookings: u.total_bookings||0, Joined: fmt(u.created_at) }))
+    if (type==='csv') exportCSV(rows, 'users')
+    else if (type==='excel') exportExcel(rows, 'users', 'Users')
+    else exportPDF(['Name','Phone','City','Status','Bookings','Joined'], rows.map(r=>Object.values(r)), 'Users Report', 'users')
+  }
 
   return (
-    <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
-      {/* Header */}
-      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:12 }}>
-        <div>
-          <div style={{ color:'#94A3B8', fontSize:13 }}>{filtered.length} customers found</div>
+    <div>
+      <TopBar title="User Management" subtitle={`${users.length} registered customers`} actions={
+        <div style={{ display:'flex', gap:8 }}>
+          <button onClick={()=>doExport('csv')} style={btnS('#10b981')}>CSV</button>
+          <button onClick={()=>doExport('excel')} style={btnS('#3b82f6')}>Excel</button>
+          <button onClick={()=>doExport('pdf')} style={btnS('#ef4444')}>PDF</button>
         </div>
-        <div style={{ display:'flex', gap:10, alignItems:'center' }}>
-          <input
-            placeholder="Search name, phone, city…"
-            value={search} onChange={e => { setSearch(e.target.value); setPage(0) }}
-            style={{
-              background:'#1E293B', border:'1px solid #334155', borderRadius:8,
-              padding:'8px 14px', color:'#F1F5F9', fontSize:13, outline:'none',
-              fontFamily:'inherit', width:240
-            }}
-          />
-          <button onClick={load} style={{
-            background:'#334155', border:'none', borderRadius:8, padding:'8px 14px',
-            color:'#94A3B8', cursor:'pointer', fontFamily:'inherit', fontSize:13
-          }}>↻ Refresh</button>
-        </div>
-      </div>
-
-      {/* Table */}
-      <div style={{ background:'#1E293B', border:'1px solid #334155', borderRadius:16, overflow:'hidden' }}>
-        <DataTable
-          columns={columns} rows={paginated}
-          loading={loading} emptyMsg="No users found"
-          onRowClick={setSelected}
-        />
-      </div>
-
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div style={{ display:'flex', justifyContent:'center', gap:8 }}>
-          {Array.from({ length:totalPages }, (_, i) => (
-            <button key={i} onClick={() => setPage(i)}
-              style={{
-                width:32, height:32, borderRadius:6, border:'none',
-                background: page===i ? Y : '#1E293B', color: page===i ? '#0F172A' : '#64748B',
-                fontWeight: page===i ? 700 : 400, cursor:'pointer', fontSize:13, fontFamily:'inherit'
-              }}>
-              {i+1}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* User detail modal */}
-      {selected && (
-        <div style={{
-          position:'fixed', inset:0, background:'rgba(0,0,0,.7)', zIndex:999,
-          display:'flex', alignItems:'center', justifyContent:'center'
-        }} onClick={() => setSelected(null)}>
-          <div style={{
-            background:'#1E293B', border:'1px solid #334155', borderRadius:20,
-            padding:32, width:460, boxShadow:'0 24px 64px rgba(0,0,0,.5)'
-          }} onClick={e => e.stopPropagation()}>
-            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:24 }}>
-              <h2 style={{ color:'#F1F5F9', fontWeight:700, fontSize:18, margin:0 }}>👤 User Details</h2>
-              <button onClick={() => setSelected(null)}
-                style={{ background:'#334155', border:'none', borderRadius:8, color:'#94A3B8', padding:'6px 12px', cursor:'pointer', fontFamily:'inherit' }}>
-                ✕ Close
-              </button>
+      } />
+      <div style={{ padding:32 }}>
+        <div style={{ background:'#fff', borderRadius:12, boxShadow:'0 1px 3px rgba(0,0,0,0.08)', overflow:'hidden' }}>
+          <div style={{ padding:'16px 20px', borderBottom:'1px solid #e2e8f0', display:'flex', gap:12, alignItems:'center', flexWrap:'wrap' }}>
+            <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search by name or phone..." style={{ padding:'9px 14px', border:'1px solid #e2e8f0', borderRadius:8, fontSize:14, width:260, outline:'none' }} />
+            {['all','active','suspended','banned'].map(f => (
+              <button key={f} onClick={()=>setFilter(f)} style={{ padding:'8px 14px', borderRadius:8, border:'none', cursor:'pointer', fontSize:13, fontWeight:600, background: filter===f ? '#6366f1' : '#f1f5f9', color: filter===f ? '#fff' : '#64748b', textTransform:'capitalize' }}>{f}</button>
+            ))}
+            <span style={{ marginLeft:'auto', fontSize:13, color:'#64748b' }}>{filtered.length} results</span>
+          </div>
+          {loading ? <Loader /> : (
+            <div style={{ overflowX:'auto' }}>
+              <table>
+                <thead><tr>
+                  {['Name','Phone','City','Bookings','Joined','Status','Actions'].map(h=><th key={h} style={th}>{h}</th>)}
+                </tr></thead>
+                <tbody>
+                  {filtered.map(u => (
+                    <tr key={u.id} style={{ cursor:'pointer' }} onMouseEnter={e=>e.currentTarget.style.background='#f8fafc'} onMouseLeave={e=>e.currentTarget.style.background='#fff'}>
+                      <td style={td}><div style={{ fontWeight:600 }}>{u.name||'No name'}</div><div style={{ fontSize:11, color:'#94a3b8' }}>{u.id.slice(0,8)}...</div></td>
+                      <td style={td}>{u.phone||'-'}</td>
+                      <td style={td}>{u.city||'-'}</td>
+                      <td style={td}><span style={{ fontWeight:700, color:'#6366f1' }}>{u.total_bookings||0}</span></td>
+                      <td style={td}>{fmt(u.created_at)}</td>
+                      <td style={td}><Badge status={u.account_status||'active'} /></td>
+                      <td style={td}>
+                        <div style={{ display:'flex', gap:6 }}>
+                          <button onClick={()=>openUser(u)} style={btnS('#6366f1','sm')}>View</button>
+                          {(u.account_status||'active')==='active' && <button onClick={()=>updateStatus(u.id,'suspended')} style={btnS('#f59e0b','sm')}>Suspend</button>}
+                          {(u.account_status||'active')!=='banned' && <button onClick={()=>updateStatus(u.id,'banned')} style={btnS('#ef4444','sm')}>Ban</button>}
+                          {(u.account_status||'active')!=='active' && <button onClick={()=>updateStatus(u.id,'active')} style={btnS('#10b981','sm')}>Restore</button>}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {!filtered.length && <div style={{ padding:40, textAlign:'center', color:'#94a3b8' }}>No users found</div>}
             </div>
-            {[
-              ['Name',    selected.name    || '—'],
-              ['Phone',   selected.phone   || '—'],
-              ['Email',   selected.email   || '—'],
-              ['City',    selected.city    || '—'],
-              ['Address', selected.address || '—'],
-              ['Joined',  selected.created_at ? new Date(selected.created_at).toLocaleString('en-IN') : '—'],
-              ['User ID', selected.id],
-            ].map(([k,v]) => (
-              <div key={k} style={{
-                display:'flex', gap:12, padding:'10px 0',
-                borderBottom:'1px solid #334155'
-              }}>
-                <span style={{ color:'#64748B', fontSize:13, minWidth:80 }}>{k}</span>
-                <span style={{ color:'#F1F5F9', fontSize:13, fontWeight:500, wordBreak:'break-all' }}>{v}</span>
+          )}
+        </div>
+      </div>
+      {selected && (
+        <Modal title={`User: ${selected.name||'No name'}`} onClose={()=>setSelected(null)} width={700}>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16, marginBottom:24 }}>
+            {[['Phone',selected.phone],['City',selected.city],['Status',selected.account_status||'active'],['Joined',fmt(selected.created_at)],['Total Bookings',selected.total_bookings||0]].map(([l,v])=>(
+              <div key={l} style={{ background:'#f8fafc', borderRadius:8, padding:'12px 16px' }}>
+                <div style={{ fontSize:11, color:'#64748b', fontWeight:600, marginBottom:4 }}>{l}</div>
+                <div style={{ fontWeight:700, color:'#0f172a' }}>{v||'-'}</div>
               </div>
             ))}
           </div>
-        </div>
+          <h3 style={{ fontWeight:700, marginBottom:12 }}>Booking History ({bookings.length})</h3>
+          <div style={{ maxHeight:300, overflowY:'auto', border:'1px solid #e2e8f0', borderRadius:8 }}>
+            <table>
+              <thead><tr>{['Service','Status','Amount','Payment','Date'].map(h=><th key={h} style={{...th,background:'#fff'}}>{h}</th>)}</tr></thead>
+              <tbody>
+                {bookings.map(b=>(
+                  <tr key={b.id}>
+                    <td style={td}>{b.service||'-'}</td>
+                    <td style={td}><Badge status={b.status} /></td>
+                    <td style={td}>{INR(b.amount)}</td>
+                    <td style={td}><Badge status={b.payment_status||'pending'} /></td>
+                    <td style={td}>{fmt(b.created_at)}</td>
+                  </tr>
+                ))}
+                {!bookings.length && <tr><td colSpan={5} style={{ padding:20, textAlign:'center', color:'#94a3b8' }}>No bookings</td></tr>}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ display:'flex', gap:8, marginTop:20 }}>
+            {(selected.account_status||'active')==='active' && <button disabled={saving} onClick={()=>updateStatus(selected.id,'suspended')} style={btnS('#f59e0b')}>Suspend User</button>}
+            {(selected.account_status||'active')!=='banned' && <button disabled={saving} onClick={()=>updateStatus(selected.id,'banned')} style={btnS('#ef4444')}>Ban User</button>}
+            {(selected.account_status||'active')!=='active' && <button disabled={saving} onClick={()=>updateStatus(selected.id,'active')} style={btnS('#10b981')}>Restore Access</button>}
+          </div>
+        </Modal>
       )}
     </div>
   )
+}
+
+function btnS(bg, size='md') {
+  return { background:bg, color:'#fff', border:'none', borderRadius: size==='sm' ? 6 : 8, padding: size==='sm' ? '5px 10px' : '9px 16px', fontSize: size==='sm' ? 12 : 13, fontWeight:600, cursor:'pointer', whiteSpace:'nowrap' }
 }

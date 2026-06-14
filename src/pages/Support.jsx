@@ -1,239 +1,176 @@
 import { useState, useEffect } from 'react'
 import { sb } from '../lib/supabase'
+import TopBar from '../components/TopBar'
+import Badge from '../components/Badge'
+import Modal from '../components/Modal'
+import Loader from '../components/Loader'
 
-const Y = '#F5C000'
+const fmt = d => d ? new Date(d).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '-'
+function btnS(bg,size='md') { return { background:bg,color:'#fff',border:'none',borderRadius:size==='sm'?6:8,padding:size==='sm'?'5px 10px':'9px 16px',fontSize:size==='sm'?12:13,fontWeight:600,cursor:'pointer',whiteSpace:'nowrap' } }
 
-const PRIORITY_COLORS = {
-  low:    { bg:'#33415520', color:'#64748B' },
-  medium: { bg:'#f9731620', color:'#f97316' },
-  high:   { bg:'#ef444420', color:'#ef4444' },
-}
-
-const STATUS_COLORS = {
-  open:        { bg:'#3b82f620', color:'#3b82f6' },
-  in_progress: { bg:Y+'20',     color:Y          },
-  resolved:    { bg:'#22c55e20',color:'#22c55e'  },
-  closed:      { bg:'#33415520',color:'#64748B'  },
-}
-
-function Badge({ text, map }) {
-  const s = (map || {})[text] || { bg:'#33415520', color:'#64748B' }
-  return (
-    <span style={{ background:s.bg, color:s.color, fontSize:11, fontWeight:700, padding:'4px 9px', borderRadius:6, textTransform:'capitalize', whiteSpace:'nowrap' }}>
-      {(text||'—').replace(/_/g,' ')}
-    </span>
-  )
-}
-
-export default function Support({ showToast }) {
-  const [tickets,  setTickets]  = useState([])
-  const [loading,  setLoading]  = useState(true)
-  const [filter,   setFilter]   = useState('open')
+export default function Support() {
+  const [tickets, setTickets] = useState([])
+  const [disputes, setDisputes] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [tab, setTab] = useState('tickets')
+  const [filter, setFilter] = useState('all')
   const [selected, setSelected] = useState(null)
-  const [reply,    setReply]    = useState('')
-  const [saving,   setSaving]   = useState(false)
-  const [search,   setSearch]   = useState('')
+  const [reply, setReply] = useState('')
+  const [saving, setSaving] = useState(false)
 
   useEffect(() => { load() }, [])
 
   async function load() {
     setLoading(true)
-    const { data, error } = await sb
-      .from('support_tickets')
-      .select('*')
-      .order('created_at', { ascending:false })
-    if (error) {
-      // Table may not exist yet
-      if (error.code === '42P01') {
-        showToast('support_tickets table not found — run DB migration', 'error')
-        setTickets([])
-      } else {
-        showToast(error.message, 'error')
-      }
-    } else {
-      setTickets(data || [])
-    }
+    const [t, d] = await Promise.all([
+      sb.from('support_tickets').select('*').order('created_at',{ascending:false}),
+      sb.from('disputes').select('*, bookings(service,customer_name,amount)').order('created_at',{ascending:false}),
+    ])
+    setTickets(t.data||[])
+    setDisputes(d.data||[])
     setLoading(false)
   }
 
-  async function updateStatus(id, status) {
-    const { error } = await sb.from('support_tickets').update({ status }).eq('id', id)
-    if (error) { showToast(error.message, 'error'); return }
-    setTickets(ts => ts.map(t => t.id === id ? {...t, status} : t))
-    if (selected?.id === id) setSelected(s => ({...s, status}))
-    showToast('Status updated ✓')
-  }
-
-  async function sendReply(id) {
-    if (!reply.trim()) return
+  async function updateTicket(id, status, adminReply) {
     setSaving(true)
-    const { error } = await sb.from('support_tickets').update({
-      admin_reply: reply.trim(),
-      status:      'in_progress',
-      replied_at:  new Date().toISOString(),
-    }).eq('id', id)
-    if (error) { showToast(error.message, 'error') }
-    else {
-      showToast('Reply sent ✓')
-      setSelected(s => ({...s, admin_reply: reply.trim(), status:'in_progress'}))
-      setTickets(ts => ts.map(t => t.id===id ? {...t, admin_reply:reply.trim(), status:'in_progress'} : t))
-      setReply('')
-    }
+    await sb.from('support_tickets').update({ status, admin_reply: adminReply||null, replied_at: adminReply?new Date().toISOString():null }).eq('id',id)
+    await load()
     setSaving(false)
+    setSelected(null)
   }
 
-  const FILTERS = ['all','open','in_progress','resolved','closed']
-  const counts  = {}
-  FILTERS.forEach(f => counts[f] = f==='all' ? tickets.length : tickets.filter(t=>t.status===f).length)
+  async function updateDispute(id, status, resolution) {
+    setSaving(true)
+    await sb.from('disputes').update({ status, resolution: resolution||null, resolved_at: ['resolved','closed'].includes(status)?new Date().toISOString():null }).eq('id',id)
+    await load()
+    setSaving(false)
+    setSelected(null)
+  }
 
-  const filtered = tickets.filter(t => {
-    if (filter !== 'all' && t.status !== filter) return false
-    const q = search.toLowerCase()
-    return !q || (t.subject||'').toLowerCase().includes(q) || (t.body||'').toLowerCase().includes(q) || (t.user_email||'').toLowerCase().includes(q)
-  })
+  const filteredTickets = tickets.filter(t=>filter==='all'||t.status===filter)
+  const filteredDisputes = disputes.filter(d=>filter==='all'||d.status===filter)
+  const openCount = tickets.filter(t=>t.status==='open').length + disputes.filter(d=>d.status==='open').length
+
+  const th = { padding:'10px 16px',textAlign:'left',fontSize:12,fontWeight:700,color:'#64748b',textTransform:'uppercase',letterSpacing:'0.5px',background:'#f8fafc',borderBottom:'1px solid #e2e8f0' }
+  const td = { padding:'12px 16px',fontSize:14,color:'#1e293b',borderBottom:'1px solid #f1f5f9' }
 
   return (
-    <div style={{ display:'flex', gap:16, height:'calc(100vh - 108px)' }}>
-      {/* Ticket list */}
-      <div style={{ width:380, display:'flex', flexDirection:'column', gap:10, flexShrink:0 }}>
-        {/* Tabs */}
-        <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
-          {FILTERS.map(f => (
-            <button key={f} onClick={() => setFilter(f)}
-              style={{
-                padding:'6px 12px', borderRadius:7, border:'none', cursor:'pointer',
-                fontFamily:'inherit', fontSize:11, fontWeight:600,
-                background: filter===f ? Y : '#1E293B',
-                color: filter===f ? '#0F172A' : '#64748B'
-              }}>
-              {f.replace(/_/g,' ')} ({counts[f]??0})
-            </button>
+    <div>
+      <TopBar title="Support Management" subtitle={`${openCount} open items requiring attention`} />
+      <div style={{ padding:32 }}>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12, marginBottom:24 }}>
+          {[['Open Tickets',tickets.filter(t=>t.status==='open').length,'#ef4444'],['In Progress',tickets.filter(t=>t.status==='in_progress').length,'#f59e0b'],['Resolved',tickets.filter(t=>t.status==='resolved').length,'#10b981'],['Open Disputes',disputes.filter(d=>d.status==='open').length,'#8b5cf6']].map(([l,v,c])=>(
+            <div key={l} style={{ background:'#fff', borderRadius:10, padding:'14px 18px', boxShadow:'0 1px 3px rgba(0,0,0,0.08)', borderLeft:`4px solid ${c}` }}>
+              <div style={{ fontSize:12, color:'#64748b', fontWeight:600, marginBottom:4 }}>{l}</div>
+              <div style={{ fontSize:26, fontWeight:800, color:'#0f172a' }}>{v}</div>
+            </div>
           ))}
         </div>
-        <input placeholder="Search tickets…"
-          value={search} onChange={e => setSearch(e.target.value)}
-          style={{ background:'#1E293B', border:'1px solid #334155', borderRadius:8, padding:'8px 12px', color:'#F1F5F9', fontSize:13, outline:'none', fontFamily:'inherit' }} />
-
-        <div style={{ flex:1, overflowY:'auto', display:'flex', flexDirection:'column', gap:6 }}>
-          {loading ? (
-            <div style={{ textAlign:'center', padding:40, color:'#475569' }}>⏳ Loading…</div>
-          ) : filtered.length === 0 ? (
-            <div style={{ textAlign:'center', padding:40, color:'#475569' }}>
-              <div style={{ fontSize:28, marginBottom:8 }}>🎫</div>
-              No tickets found
-            </div>
-          ) : filtered.map(t => (
-            <button key={t.id}
-              onClick={() => { setSelected(t); setReply('') }}
-              style={{
-                background: selected?.id===t.id ? '#334155' : '#1E293B',
-                border:`1px solid ${selected?.id===t.id ? Y+'40' : '#334155'}`,
-                borderRadius:10, padding:'12px 14px', cursor:'pointer',
-                fontFamily:'inherit', textAlign:'left', transition:'all .15s'
-              }}>
-              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:6 }}>
-                <span style={{ color:'#F1F5F9', fontWeight:600, fontSize:13 }}>{t.subject || t.category || 'Support Request'}</span>
-                <Badge text={t.status||'open'} map={STATUS_COLORS} />
-              </div>
-              <div style={{ color:'#64748B', fontSize:12 }}>{t.user_email || 'Anonymous'}</div>
-              <div style={{ color:'#475569', fontSize:12, marginTop:4 }}>
-                {new Date(t.created_at).toLocaleDateString('en-IN', { day:'2-digit', month:'short' })}
-              </div>
-            </button>
+        <div style={{ display:'flex', gap:8, marginBottom:16 }}>
+          {['tickets','disputes'].map(t=>(
+            <button key={t} onClick={()=>setTab(t)} style={{ padding:'10px 20px', borderRadius:8, border:'none', cursor:'pointer', fontSize:14, fontWeight:600, background:tab===t?'#6366f1':'#fff', color:tab===t?'#fff':'#64748b', boxShadow:'0 1px 3px rgba(0,0,0,0.08)', textTransform:'capitalize' }}>{t} ({t==='tickets'?tickets.length:disputes.length})</button>
           ))}
+          <div style={{ marginLeft:'auto', display:'flex', gap:6 }}>
+            {['all','open','in_progress','resolved','closed'].map(f=>(
+              <button key={f} onClick={()=>setFilter(f)} style={{ padding:'7px 10px', borderRadius:7, border:'none', cursor:'pointer', fontSize:12, fontWeight:600, background:filter===f?'#0f172a':'#f1f5f9', color:filter===f?'#fff':'#64748b', textTransform:'capitalize' }}>{f.replace('_',' ')}</button>
+            ))}
+          </div>
+        </div>
+        <div style={{ background:'#fff', borderRadius:12, boxShadow:'0 1px 3px rgba(0,0,0,0.08)', overflow:'hidden' }}>
+          {loading ? <Loader /> : tab==='tickets' ? (
+            <div style={{ overflowX:'auto' }}>
+              <table>
+                <thead><tr>{['Category','Subject','User','Priority','Status','Date','Actions'].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {filteredTickets.map(t=>(
+                    <tr key={t.id} onMouseEnter={e=>e.currentTarget.style.background='#f8fafc'} onMouseLeave={e=>e.currentTarget.style.background='#fff'}>
+                      <td style={td}><span style={{ fontSize:12, background:'#f1f5f9', padding:'3px 8px', borderRadius:6 }}>{t.category||'General'}</span></td>
+                      <td style={td}><div style={{ fontWeight:600, maxWidth:200 }}>{t.subject||'-'}</div></td>
+                      <td style={td}><div style={{ fontSize:12, color:'#64748b' }}>{t.user_email||'-'}</div></td>
+                      <td style={td}><Badge status={t.priority||'medium'} /></td>
+                      <td style={td}><Badge status={t.status||'open'} /></td>
+                      <td style={td} style={{ ...td, fontSize:12 }}>{fmt(t.created_at)}</td>
+                      <td style={td}>
+                        <div style={{ display:'flex', gap:4 }}>
+                          <button onClick={()=>{ setSelected({...t,_type:'ticket'}); setReply(t.admin_reply||'') }} style={btnS('#6366f1','sm')}>Reply</button>
+                          {t.status==='open' && <button onClick={()=>updateTicket(t.id,'in_progress',null)} style={btnS('#f59e0b','sm')}>Assign</button>}
+                          {t.status!=='resolved' && <button onClick={()=>updateTicket(t.id,'resolved',t.admin_reply)} style={btnS('#10b981','sm')}>Resolve</button>}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {!filteredTickets.length && <tr><td colSpan={7} style={{ padding:40, textAlign:'center', color:'#94a3b8' }}>No tickets found</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div style={{ overflowX:'auto' }}>
+              <table>
+                <thead><tr>{['Booking','Raised By','Reason','Status','Date','Actions'].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {filteredDisputes.map(d=>(
+                    <tr key={d.id} onMouseEnter={e=>e.currentTarget.style.background='#f8fafc'} onMouseLeave={e=>e.currentTarget.style.background='#fff'}>
+                      <td style={td}><div style={{ fontWeight:600 }}>{d.bookings?.service||'-'}</div><div style={{ fontSize:11, color:'#94a3b8' }}>{d.bookings?.customer_name||'-'}</div></td>
+                      <td style={td}><Badge status={d.raised_by_role||'customer'} /></td>
+                      <td style={td}><div style={{ maxWidth:200, fontSize:13 }}>{d.reason||'-'}</div></td>
+                      <td style={td}><Badge status={d.status||'open'} /></td>
+                      <td style={td} style={{ ...td, fontSize:12 }}>{fmt(d.created_at)}</td>
+                      <td style={td}>
+                        <div style={{ display:'flex', gap:4 }}>
+                          <button onClick={()=>setSelected({...d,_type:'dispute'})} style={btnS('#6366f1','sm')}>View</button>
+                          {d.status==='open' && <>
+                            <button onClick={()=>updateDispute(d.id,'resolved','Resolved by admin')} style={btnS('#10b981','sm')}>Resolve</button>
+                            <button onClick={()=>updateDispute(d.id,'closed','Escalated')} style={btnS('#ef4444','sm')}>Escalate</button>
+                          </>}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {!filteredDisputes.length && <tr><td colSpan={6} style={{ padding:40, textAlign:'center', color:'#94a3b8' }}>No disputes found</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </div>
-
-      {/* Ticket detail */}
-      {selected ? (
-        <div style={{ flex:1, background:'#1E293B', border:'1px solid #334155', borderRadius:16, display:'flex', flexDirection:'column', overflow:'hidden' }}>
-          {/* Header */}
-          <div style={{ padding:'20px 24px', borderBottom:'1px solid #334155', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-            <div>
-              <h3 style={{ color:'#F1F5F9', fontWeight:700, fontSize:16, margin:0 }}>
-                {selected.subject || selected.category || 'Support Ticket'}
-              </h3>
-              <div style={{ display:'flex', gap:8, marginTop:8 }}>
-                <Badge text={selected.status||'open'} map={STATUS_COLORS} />
-                {selected.priority && <Badge text={selected.priority} map={PRIORITY_COLORS} />}
-              </div>
-            </div>
-            <div style={{ display:'flex', gap:8 }}>
-              {['in_progress','resolved','closed'].map(s => (
-                <button key={s} onClick={() => updateStatus(selected.id, s)}
-                  disabled={selected.status===s}
-                  style={{
-                    padding:'7px 12px', borderRadius:8, border:'none',
-                    background: selected.status===s ? '#334155' : '#0F172A',
-                    color: selected.status===s ? '#475569' : '#94A3B8',
-                    cursor: selected.status===s ? 'default' : 'pointer',
-                    fontFamily:'inherit', fontSize:11, fontWeight:600
-                  }}>
-                  {s.replace(/_/g,' ')}
-                </button>
-              ))}
-            </div>
+      {selected?._type==='ticket' && (
+        <Modal title={`Ticket: ${selected.subject||'No subject'}`} onClose={()=>setSelected(null)} width={620}>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:16 }}>
+            {[['Category',selected.category],['Priority',<Badge status={selected.priority||'medium'} />],['Status',<Badge status={selected.status||'open'} />],['User',selected.user_email]].map(([l,v])=>(
+              <div key={l} style={{ background:'#f8fafc', borderRadius:8, padding:'10px 14px' }}><div style={{ fontSize:11, color:'#64748b', fontWeight:600, marginBottom:3 }}>{l}</div><div style={{ fontWeight:600, fontSize:13 }}>{v||'-'}</div></div>
+            ))}
           </div>
-
-          {/* Ticket body */}
-          <div style={{ flex:1, overflowY:'auto', padding:'20px 24px' }}>
-            <div style={{ marginBottom:16 }}>
-              {[
-                ['From',     selected.user_email || 'Anonymous'],
-                ['Category', selected.category   || '—'],
-                ['Created',  new Date(selected.created_at).toLocaleString('en-IN')],
-              ].map(([k,v]) => (
-                <div key={k} style={{ display:'flex', gap:10, marginBottom:6 }}>
-                  <span style={{ color:'#64748B', fontSize:12, minWidth:70 }}>{k}:</span>
-                  <span style={{ color:'#94A3B8', fontSize:12 }}>{v}</span>
-                </div>
-              ))}
-            </div>
-
-            {/* Message */}
-            <div style={{ background:'#0F172A', borderRadius:10, padding:'14px 16px', marginBottom:20 }}>
-              <p style={{ color:'#64748B', fontSize:11, marginBottom:6 }}>CUSTOMER MESSAGE</p>
-              <p style={{ color:'#F1F5F9', fontSize:14, lineHeight:1.6 }}>{selected.body || selected.message || '(No message)'}</p>
-            </div>
-
-            {/* Existing admin reply */}
-            {selected.admin_reply && (
-              <div style={{ background:'rgba(245,192,0,.08)', border:'1px solid rgba(245,192,0,.2)', borderRadius:10, padding:'14px 16px', marginBottom:20 }}>
-                <p style={{ color:Y, fontSize:11, marginBottom:6 }}>ADMIN REPLY</p>
-                <p style={{ color:'#F1F5F9', fontSize:14, lineHeight:1.6 }}>{selected.admin_reply}</p>
-              </div>
-            )}
-
-            {/* Reply box */}
-            <div>
-              <p style={{ color:'#64748B', fontSize:11, marginBottom:6 }}>REPLY TO CUSTOMER</p>
-              <textarea
-                value={reply} onChange={e => setReply(e.target.value)}
-                rows={4} placeholder="Type your reply…"
-                style={{
-                  width:'100%', background:'#0F172A', border:'1px solid #334155', borderRadius:10,
-                  padding:'12px 14px', color:'#F1F5F9', fontSize:14, fontFamily:'inherit',
-                  outline:'none', resize:'vertical', boxSizing:'border-box'
-                }}
-              />
-              <button onClick={() => sendReply(selected.id)} disabled={!reply.trim() || saving}
-                style={{
-                  marginTop:10, background:Y, border:'none', borderRadius:10, padding:'10px 22px',
-                  color:'#0F172A', fontWeight:700, fontSize:14, cursor:'pointer', fontFamily:'inherit',
-                  opacity: (!reply.trim() || saving) ? 0.5 : 1
-                }}>
-                {saving ? 'Sending…' : '↑ Send Reply'}
-              </button>
-            </div>
+          <div style={{ background:'#f8fafc', borderRadius:8, padding:'12px 16px', marginBottom:16 }}>
+            <div style={{ fontSize:11, color:'#64748b', fontWeight:600, marginBottom:6 }}>Message</div>
+            <div style={{ fontSize:14 }}>{selected.body||'-'}</div>
           </div>
-        </div>
-      ) : (
-        <div style={{ flex:1, background:'#1E293B', border:'1px solid #334155', borderRadius:16, display:'flex', alignItems:'center', justifyContent:'center', color:'#475569' }}>
-          <div style={{ textAlign:'center' }}>
-            <div style={{ fontSize:48, marginBottom:12 }}>🎫</div>
-            <p>Select a ticket to view details</p>
+          <textarea value={reply} onChange={e=>setReply(e.target.value)} placeholder="Type your reply..." rows={4} style={{ width:'100%', padding:'10px 14px', border:'1px solid #e2e8f0', borderRadius:8, fontSize:14, outline:'none', resize:'vertical', marginBottom:12 }} />
+          <div style={{ display:'flex', gap:8 }}>
+            <button disabled={saving} onClick={()=>updateTicket(selected.id,'in_progress',reply)} style={btnS('#6366f1')}>Send Reply</button>
+            <button disabled={saving} onClick={()=>updateTicket(selected.id,'resolved',reply)} style={btnS('#10b981')}>Reply and Resolve</button>
+            <button disabled={saving} onClick={()=>updateTicket(selected.id,'closed',reply)} style={btnS('#64748b')}>Close Ticket</button>
           </div>
-        </div>
+        </Modal>
+      )}
+      {selected?._type==='dispute' && (
+        <Modal title="Dispute Details" onClose={()=>setSelected(null)} width={580}>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:16 }}>
+            {[['Service',selected.bookings?.service],['Customer',selected.bookings?.customer_name],['Amount',`Rs.${selected.bookings?.amount||0}`],['Raised By',selected.raised_by_role],['Status',<Badge status={selected.status||'open'} />],['Date',fmt(selected.created_at)]].map(([l,v])=>(
+              <div key={l} style={{ background:'#f8fafc', borderRadius:8, padding:'10px 14px' }}><div style={{ fontSize:11, color:'#64748b', fontWeight:600, marginBottom:3 }}>{l}</div><div style={{ fontWeight:600, fontSize:13 }}>{v||'-'}</div></div>
+            ))}
+          </div>
+          <div style={{ background:'#fff3cd', borderRadius:8, padding:'12px 16px', marginBottom:16 }}>
+            <div style={{ fontSize:11, color:'#92400e', fontWeight:600, marginBottom:4 }}>Reason</div>
+            <div style={{ fontSize:14 }}>{selected.reason||'-'}</div>
+          </div>
+          <textarea placeholder="Enter resolution notes..." rows={3} style={{ width:'100%', padding:'10px 14px', border:'1px solid #e2e8f0', borderRadius:8, fontSize:14, outline:'none', resize:'vertical', marginBottom:12 }} id="dispute-res" />
+          <div style={{ display:'flex', gap:8 }}>
+            {selected.status==='open' && <>
+              <button disabled={saving} onClick={()=>updateDispute(selected.id,'resolved',document.getElementById('dispute-res')?.value)} style={btnS('#10b981')}>Mark Resolved</button>
+              <button disabled={saving} onClick={()=>updateDispute(selected.id,'closed','Escalated to senior team')} style={btnS('#ef4444')}>Escalate</button>
+            </>}
+          </div>
+        </Modal>
       )}
     </div>
   )

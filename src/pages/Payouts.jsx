@@ -1,228 +1,168 @@
 import { useState, useEffect } from 'react'
 import { sb } from '../lib/supabase'
+import TopBar from '../components/TopBar'
+import Badge from '../components/Badge'
+import Modal from '../components/Modal'
+import Loader from '../components/Loader'
+import { exportCSV, exportExcel } from '../lib/export'
 
-const Y = '#F5C000'
+const fmt = d => d ? new Date(d).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '-'
+const INR = v => 'Rs.' + (v||0).toLocaleString('en-IN')
+function btnS(bg,size='md') { return { background:bg,color:'#fff',border:'none',borderRadius:size==='sm'?6:8,padding:size==='sm'?'5px 10px':'9px 16px',fontSize:size==='sm'?12:13,fontWeight:600,cursor:'pointer',whiteSpace:'nowrap' } }
 
-// Get Monday of the week containing `d`
-function weekStart(d) {
-  const dt = new Date(d)
-  const day = dt.getDay()
-  const diff = (day + 6) % 7
-  dt.setDate(dt.getDate() - diff)
-  dt.setHours(0, 0, 0, 0)
-  return dt
-}
+export default function Payouts() {
+  const [payouts, setPayouts] = useState([])
+  const [workers, setWorkers] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [filter, setFilter] = useState('all')
+  const [selected, setSelected] = useState(null)
+  const [showCreate, setShowCreate] = useState(false)
+  const [newPayout, setNewPayout] = useState({ worker_id:'', amount:'', notes:'', utr:'' })
+  const [saving, setSaving] = useState(false)
 
-function fmtDate(d) {
-  return new Date(d).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' })
-}
-
-export default function Payouts({ showToast }) {
-  const [workers,    setWorkers]    = useState([])
-  const [bookings,   setBookings]   = useState([])
-  const [loading,    setLoading]    = useState(true)
-  const [weekOffset, setWeekOffset] = useState(0)   // 0 = current week, -1 = last week…
-  const [processing, setProcessing] = useState({})
-  const [search,     setSearch]     = useState('')
-
-  // Compute week range
-  const today  = new Date()
-  today.setDate(today.getDate() + weekOffset * 7)
-  const wStart = weekStart(today)
-  const wEnd   = new Date(wStart); wEnd.setDate(wEnd.getDate() + 6); wEnd.setHours(23,59,59,999)
-
-  useEffect(() => { load() }, [weekOffset])
+  useEffect(() => { load() }, [])
 
   async function load() {
     setLoading(true)
-    const [wRes, bRes] = await Promise.all([
-      sb.from('workers').select('id, name, phone, skill, city, upi_id, kyc_status'),
-      sb.from('bookings')
-        .select('id, worker_id, amount, created_at, status')
-        .eq('status', 'completed')
-        .gte('created_at', wStart.toISOString())
-        .lte('created_at', wEnd.toISOString()),
+    const [p, w] = await Promise.all([
+      sb.from('payouts').select('*, workers(name,phone,upi_id)').order('created_at',{ascending:false}),
+      sb.from('workers').select('id,name,phone,upi_id,wallet_balance').order('name'),
     ])
-    if (wRes.error) showToast(wRes.error.message, 'error')
-    if (bRes.error) showToast(bRes.error.message, 'error')
-    setWorkers(wRes.data || [])
-    setBookings(bRes.data || [])
+    setPayouts(p.data||[])
+    setWorkers(w.data||[])
     setLoading(false)
   }
 
-  // Aggregate earnings per worker
-  const workerPayouts = workers
-    .map(w => {
-      const myJobs = bookings.filter(b => b.worker_id === w.id)
-      const gmv    = myJobs.reduce((s,b) => s + (b.amount||0), 0)
-      const workerEarning = Math.round(gmv * 0.90)
-      return { ...w, jobs: myJobs.length, gmv, workerEarning }
-    })
-    .filter(w => w.jobs > 0)
-    .sort((a,b) => b.workerEarning - a.workerEarning)
-
-  const totalGMV     = workerPayouts.reduce((s,w) => s + w.gmv, 0)
-  const totalPayout  = workerPayouts.reduce((s,w) => s + w.workerEarning, 0)
-  const totalJobs    = workerPayouts.reduce((s,w) => s + w.jobs, 0)
-
-  const filtered = workerPayouts.filter(w => {
-    const q = search.toLowerCase()
-    return !q || (w.name||'').toLowerCase().includes(q) || (w.skill||'').toLowerCase().includes(q) || (w.city||'').toLowerCase().includes(q)
-  })
-
-  async function markPaid(workerId) {
-    // Log payout record
-    setProcessing(p => ({ ...p, [workerId]: true }))
-    try {
-      const w = workerPayouts.find(w => w.id === workerId)
-      await sb.from('worker_payouts').insert({
-        worker_id:  workerId,
-        week_start: wStart.toISOString().slice(0,10),
-        week_end:   wEnd.toISOString().slice(0,10),
-        amount:     w.workerEarning,
-        gmv:        w.gmv,
-        jobs_count: w.jobs,
-        upi_id:     w.upi_id,
-        status:     'paid',
-        paid_at:    new Date().toISOString(),
-      })
-      showToast(`Payout of ₹${w.workerEarning} marked for ${w.name} ✓`)
-    } catch(e) {
-      // Table might not exist yet — still show toast
-      showToast(`Payout recorded for ${workerPayouts.find(w=>w.id===workerId)?.name} ✓`)
-    }
-    setProcessing(p => ({ ...p, [workerId]: false }))
+  async function updatePayout(id, status, extra={}) {
+    setSaving(true)
+    await sb.from('payouts').update({ status, paid_at: status==='paid'?new Date().toISOString():null, ...extra }).eq('id',id)
+    await load()
+    setSaving(false)
+    setSelected(s=>s?{...s,status}:null)
   }
 
-  function exportCSV() {
-    const header = 'Worker,Phone,Skill,City,UPI ID,Jobs,GMV,Payout (90%),Week\n'
-    const rows = filtered.map(w =>
-      [w.name, w.phone, w.skill, w.city, w.upi_id||'N/A', w.jobs, w.gmv, w.workerEarning,
-       `${fmtDate(wStart)} – ${fmtDate(wEnd)}`].join(',')
-    ).join('\n')
-    const blob = new Blob([header + rows], { type:'text/csv' })
-    const url  = URL.createObjectURL(blob)
-    const a    = document.createElement('a')
-    a.href=url; a.download=`kaamready-payouts-${wStart.toISOString().slice(0,10)}.csv`; a.click()
-    URL.revokeObjectURL(url)
-    showToast('Payout sheet exported ✓')
+  async function createPayout() {
+    if (!newPayout.worker_id||!newPayout.amount) return
+    setSaving(true)
+    const amt = parseInt(newPayout.amount)
+    const commission = Math.round(amt*0.1)
+    await sb.from('payouts').insert({ worker_id:newPayout.worker_id, amount:amt, gross_amount:Math.round(amt/0.9), commission_amount:commission, notes:newPayout.notes, status:'pending', week_start: new Date().toISOString().slice(0,10) })
+    setNewPayout({ worker_id:'', amount:'', notes:'', utr:'' })
+    setShowCreate(false)
+    await load()
+    setSaving(false)
   }
+
+  const filtered = payouts.filter(p => filter==='all'||p.status===filter)
+  const pendingAmt = payouts.filter(p=>p.status==='pending').reduce((a,p)=>a+(p.amount||0),0)
+  const releasedAmt = payouts.filter(p=>p.status==='paid').reduce((a,p)=>a+(p.amount||0),0)
+  const failedAmt = payouts.filter(p=>p.status==='failed').reduce((a,p)=>a+(p.amount||0),0)
+  const totalCommission = payouts.reduce((a,p)=>a+(p.commission_amount||0),0)
+
+  const th = { padding:'10px 16px',textAlign:'left',fontSize:12,fontWeight:700,color:'#64748b',textTransform:'uppercase',letterSpacing:'0.5px',background:'#f8fafc',borderBottom:'1px solid #e2e8f0' }
+  const td = { padding:'12px 16px',fontSize:14,color:'#1e293b',borderBottom:'1px solid #f1f5f9' }
+  const inp = { width:'100%', padding:'10px 12px', border:'1px solid #e2e8f0', borderRadius:8, fontSize:14, outline:'none', marginBottom:12 }
 
   return (
-    <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
-      {/* Week selector */}
-      <div style={{ background:'#1E293B', border:'1px solid #334155', borderRadius:12, padding:'14px 20px', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-        <button onClick={() => setWeekOffset(o => o-1)}
-          style={{ background:'#334155', border:'none', borderRadius:8, padding:'8px 14px', color:'#94A3B8', cursor:'pointer', fontFamily:'inherit', fontSize:13 }}>
-          ‹ Prev Week
-        </button>
-        <div style={{ textAlign:'center' }}>
-          <div style={{ color:'#F1F5F9', fontWeight:700, fontSize:16 }}>
-            {fmtDate(wStart)} — {fmtDate(wEnd)}
-          </div>
-          <div style={{ color:'#64748B', fontSize:12, marginTop:2 }}>
-            {weekOffset === 0 ? 'Current Week' : weekOffset === -1 ? 'Last Week' : `${Math.abs(weekOffset)} weeks ago`}
-          </div>
+    <div>
+      <TopBar title="Payout Management" subtitle="Weekly worker payout control center" actions={
+        <div style={{ display:'flex', gap:8 }}>
+          <button onClick={()=>exportCSV(filtered.map(p=>({Worker:p.workers?.name,Amount:p.amount,Status:p.status,UTR:p.utr,Date:fmt(p.created_at)})),'payouts')} style={btnS('#10b981')}>CSV</button>
+          <button onClick={()=>exportExcel(filtered.map(p=>({Worker:p.workers?.name,Amount:p.amount,Status:p.status,UTR:p.utr,Date:fmt(p.created_at)})),'payouts','Payouts')} style={btnS('#3b82f6')}>Excel</button>
+          <button onClick={()=>setShowCreate(true)} style={btnS('#6366f1')}>+ Create Payout</button>
         </div>
-        <button onClick={() => setWeekOffset(o => Math.min(0, o+1))} disabled={weekOffset===0}
-          style={{ background:'#334155', border:'none', borderRadius:8, padding:'8px 14px', color: weekOffset===0 ? '#334155' : '#94A3B8', cursor: weekOffset===0?'default':'pointer', fontFamily:'inherit', fontSize:13 }}>
-          Next Week ›
-        </button>
-      </div>
-
-      {/* KPI cards */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12 }}>
-        {[
-          { l:'Workers to Pay',  v: workerPayouts.length, color:'#3b82f6' },
-          { l:'Jobs Completed',  v: totalJobs,            color: Y        },
-          { l:'Total GMV',       v: '₹'+totalGMV.toLocaleString(),    color:'#a855f7' },
-          { l:'Total Payout',    v: '₹'+totalPayout.toLocaleString(), color:'#22c55e' },
-        ].map(({ l,v,color }) => (
-          <div key={l} style={{ background:'#1E293B', border:'1px solid #334155', borderRadius:12, padding:'16px 20px' }}>
-            <div style={{ color:'#64748B', fontSize:11, textTransform:'uppercase' }}>{l}</div>
-            <div style={{ color, fontSize:22, fontWeight:800, marginTop:6 }}>{v}</div>
+      } />
+      <div style={{ padding:32 }}>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:16, marginBottom:24 }}>
+          {[['Pending Payouts',INR(pendingAmt),'#f59e0b'],['Released Payouts',INR(releasedAmt),'#10b981'],['Failed Payouts',INR(failedAmt),'#ef4444'],['Commission Earned',INR(totalCommission),'#8b5cf6']].map(([l,v,c])=>(
+            <div key={l} style={{ background:'#fff', borderRadius:10, padding:'16px 20px', boxShadow:'0 1px 3px rgba(0,0,0,0.08)', borderLeft:`4px solid ${c}` }}>
+              <div style={{ fontSize:12, color:'#64748b', fontWeight:600, marginBottom:6 }}>{l}</div>
+              <div style={{ fontSize:22, fontWeight:800, color:'#0f172a' }}>{v}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{ background:'#fff', borderRadius:12, boxShadow:'0 1px 3px rgba(0,0,0,0.08)', overflow:'hidden' }}>
+          <div style={{ padding:'16px 20px', borderBottom:'1px solid #e2e8f0', display:'flex', gap:8 }}>
+            {['all','pending','paid','failed'].map(f=>(
+              <button key={f} onClick={()=>setFilter(f)} style={{ padding:'7px 14px', borderRadius:7, border:'none', cursor:'pointer', fontSize:13, fontWeight:600, background:filter===f?'#6366f1':'#f1f5f9', color:filter===f?'#fff':'#64748b', textTransform:'capitalize' }}>{f}</button>
+            ))}
+            <span style={{ marginLeft:'auto', fontSize:13, color:'#64748b', lineHeight:'34px' }}>{filtered.length} payouts</span>
           </div>
-        ))}
-      </div>
-
-      {/* Search + export */}
-      <div style={{ display:'flex', gap:10 }}>
-        <input placeholder="Search worker, skill, city…"
-          value={search} onChange={e => setSearch(e.target.value)}
-          style={{ background:'#1E293B', border:'1px solid #334155', borderRadius:8, padding:'8px 14px', color:'#F1F5F9', fontSize:13, outline:'none', fontFamily:'inherit', flex:1 }} />
-        <button onClick={exportCSV}
-          style={{ background:Y, border:'none', borderRadius:8, padding:'8px 16px', color:'#0F172A', fontWeight:700, cursor:'pointer', fontFamily:'inherit', fontSize:13 }}>
-          ↓ Export CSV
-        </button>
-        <button onClick={load}
-          style={{ background:'#334155', border:'none', borderRadius:8, padding:'8px 14px', color:'#94A3B8', cursor:'pointer', fontFamily:'inherit', fontSize:13 }}>
-          ↻
-        </button>
-      </div>
-
-      {/* Payout table */}
-      {loading ? (
-        <div style={{ textAlign:'center', padding:40, color:'#475569' }}>⏳ Loading payouts…</div>
-      ) : filtered.length === 0 ? (
-        <div style={{ background:'#1E293B', border:'1px solid #334155', borderRadius:16, padding:40, textAlign:'center', color:'#475569' }}>
-          <div style={{ fontSize:32, marginBottom:8 }}>💸</div>
-          No completed jobs this week
+          {loading ? <Loader /> : (
+            <div style={{ overflowX:'auto' }}>
+              <table>
+                <thead><tr>{['Worker','Phone','UPI','Amount','Commission','Status','UTR','Date','Actions'].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {filtered.map(p=>(
+                    <tr key={p.id} onMouseEnter={e=>e.currentTarget.style.background='#f8fafc'} onMouseLeave={e=>e.currentTarget.style.background='#fff'}>
+                      <td style={td}><div style={{ fontWeight:600 }}>{p.workers?.name||'-'}</div></td>
+                      <td style={td}>{p.workers?.phone||'-'}</td>
+                      <td style={td}><span style={{ fontSize:12, fontFamily:'monospace' }}>{p.workers?.upi_id||'-'}</span></td>
+                      <td style={td}><span style={{ fontWeight:700, color:'#10b981' }}>{INR(p.amount)}</span></td>
+                      <td style={td}>{INR(p.commission_amount||0)}</td>
+                      <td style={td}><Badge status={p.status||'pending'} /></td>
+                      <td style={td}><span style={{ fontSize:12, fontFamily:'monospace' }}>{p.utr||'-'}</span></td>
+                      <td style={td} style={{ ...td, fontSize:12 }}>{fmt(p.created_at)}</td>
+                      <td style={td}>
+                        <div style={{ display:'flex', gap:4 }}>
+                          <button onClick={()=>setSelected(p)} style={btnS('#6366f1','sm')}>View</button>
+                          {p.status==='pending' && <>
+                            <button onClick={()=>updatePayout(p.id,'paid')} style={btnS('#10b981','sm')}>Release</button>
+                            <button onClick={()=>updatePayout(p.id,'failed')} style={btnS('#ef4444','sm')}>Fail</button>
+                          </>}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {!filtered.length && <div style={{ padding:40, textAlign:'center', color:'#94a3b8' }}>No payouts found</div>}
+            </div>
+          )}
         </div>
-      ) : (
-        <div style={{ background:'#1E293B', border:'1px solid #334155', borderRadius:16, overflow:'hidden' }}>
-          <table style={{ width:'100%', borderCollapse:'collapse', fontSize:14 }}>
-            <thead>
-              <tr style={{ borderBottom:'1px solid #334155' }}>
-                {['Worker','Skill','City','UPI ID','Jobs','GMV','Payout (90%)','Action'].map(h => (
-                  <th key={h} style={{ textAlign:'left', padding:'10px 14px', color:'#64748B', fontWeight:600, fontSize:11, textTransform:'uppercase', letterSpacing:'.5px' }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map(w => (
-                <tr key={w.id} style={{ borderBottom:'1px solid #1E293B' }}>
-                  <td style={{ padding:'12px 14px' }}>
-                    <div style={{ color:'#F1F5F9', fontWeight:600 }}>{w.name || '—'}</div>
-                    <div style={{ color:'#475569', fontSize:12 }}>{w.phone}</div>
-                  </td>
-                  <td style={{ padding:'12px 14px', color:Y, fontWeight:600 }}>{w.skill}</td>
-                  <td style={{ padding:'12px 14px', color:'#CBD5E1' }}>{w.city || '—'}</td>
-                  <td style={{ padding:'12px 14px' }}>
-                    {w.upi_id
-                      ? <span style={{ color:'#22c55e', fontFamily:'monospace', fontSize:12 }}>{w.upi_id}</span>
-                      : <span style={{ color:'#ef4444', fontSize:12 }}>Not set</span>
-                    }
-                  </td>
-                  <td style={{ padding:'12px 14px', color:'#F1F5F9', fontWeight:700, textAlign:'center' }}>{w.jobs}</td>
-                  <td style={{ padding:'12px 14px', color:'#94A3B8' }}>₹{w.gmv.toLocaleString()}</td>
-                  <td style={{ padding:'12px 14px', color:'#22c55e', fontWeight:800, fontSize:16 }}>₹{w.workerEarning.toLocaleString()}</td>
-                  <td style={{ padding:'12px 14px' }}>
-                    <button
-                      onClick={() => markPaid(w.id)}
-                      disabled={!w.upi_id || processing[w.id]}
-                      title={!w.upi_id ? 'Worker has no UPI ID set' : 'Mark as paid'}
-                      style={{
-                        background: w.upi_id ? '#22c55e' : '#334155',
-                        color: w.upi_id ? '#fff' : '#475569',
-                        border:'none', borderRadius:8,
-                        padding:'7px 14px', cursor: w.upi_id ? 'pointer' : 'not-allowed',
-                        fontFamily:'inherit', fontSize:12, fontWeight:700,
-                        opacity: processing[w.id] ? 0.6 : 1, whiteSpace:'nowrap'
-                      }}>
-                      {processing[w.id] ? '…' : w.upi_id ? '✓ Mark Paid' : 'No UPI'}
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      </div>
+      {selected && (
+        <Modal title="Payout Details" onClose={()=>setSelected(null)} width={540}>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:20 }}>
+            {[['Worker',selected.workers?.name],['Phone',selected.workers?.phone],['UPI ID',selected.workers?.upi_id],['Payout Amount',INR(selected.amount)],['Commission',INR(selected.commission_amount||0)],['Status',<Badge status={selected.status||'pending'} />],['UTR',selected.utr||'Not provided'],['Notes',selected.notes||'-'],['Created',fmt(selected.created_at)],['Paid At',fmt(selected.paid_at)]].map(([l,v])=>(
+              <div key={l} style={{ background:'#f8fafc', borderRadius:8, padding:'10px 14px' }}>
+                <div style={{ fontSize:11, color:'#64748b', fontWeight:600, marginBottom:3 }}>{l}</div>
+                <div style={{ fontWeight:600, fontSize:13 }}>{v||'-'}</div>
+              </div>
+            ))}
+          </div>
+          {selected.status==='pending' && (
+            <div style={{ marginBottom:16 }}>
+              <input placeholder="Enter UTR number after transfer..." style={inp} onChange={e=>selected._utr=e.target.value} />
+            </div>
+          )}
+          <div style={{ display:'flex', gap:8 }}>
+            {selected.status==='pending' && <>
+              <button disabled={saving} onClick={()=>updatePayout(selected.id,'paid',{utr:selected._utr||''})} style={btnS('#10b981')}>Mark Released</button>
+              <button disabled={saving} onClick={()=>updatePayout(selected.id,'failed')} style={btnS('#ef4444')}>Mark Failed</button>
+            </>}
+          </div>
+        </Modal>
       )}
-
-      <p style={{ color:'#334155', fontSize:12, textAlign:'center' }}>
-        ⚠️ Payments are UPI-based — use the UPI IDs above to send via GPay / PhonePe / Paytm.
-        &quot;Mark Paid&quot; records the payout in the system.
-      </p>
+      {showCreate && (
+        <Modal title="Create New Payout" onClose={()=>setShowCreate(false)} width={480}>
+          <div>
+            <label style={{ fontSize:13, fontWeight:600, display:'block', marginBottom:6 }}>Worker</label>
+            <select style={inp} value={newPayout.worker_id} onChange={e=>setNewPayout(p=>({...p,worker_id:e.target.value}))}>
+              <option value="">Select worker...</option>
+              {workers.map(w=><option key={w.id} value={w.id}>{w.name} — {w.upi_id||'No UPI'} ({w.phone})</option>)}
+            </select>
+            <label style={{ fontSize:13, fontWeight:600, display:'block', marginBottom:6 }}>Payout Amount (Rs.)</label>
+            <input style={inp} type="number" placeholder="Enter amount..." value={newPayout.amount} onChange={e=>setNewPayout(p=>({...p,amount:e.target.value}))} />
+            <label style={{ fontSize:13, fontWeight:600, display:'block', marginBottom:6 }}>Notes (optional)</label>
+            <input style={inp} placeholder="Week of, special note..." value={newPayout.notes} onChange={e=>setNewPayout(p=>({...p,notes:e.target.value}))} />
+            {newPayout.amount && <div style={{ padding:'10px 14px', background:'#f0fdf4', borderRadius:8, marginBottom:12, fontSize:13 }}>
+              <b>Worker receives:</b> {INR(Math.round(parseFloat(newPayout.amount||0)))} &nbsp;|&nbsp; <b>Commission (10%):</b> {INR(Math.round(parseFloat(newPayout.amount||0)*0.1/0.9))}
+            </div>}
+            <button disabled={saving} onClick={createPayout} style={{...btnS('#6366f1'),width:'100%',padding:'12px'}}>Create Payout</button>
+          </div>
+        </Modal>
+      )}
     </div>
   )
 }
