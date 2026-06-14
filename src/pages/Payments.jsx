@@ -5,6 +5,8 @@ import Badge from '../components/Badge'
 import Modal from '../components/Modal'
 import Loader from '../components/Loader'
 import { exportCSV, exportExcel } from '../lib/export'
+import { audit, AUDIT_ACTIONS } from '../lib/audit'
+import { notifyPaymentSuccess } from '../lib/notify'
 
 const fmt = d => d ? new Date(d).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '-'
 const INR = v => 'Rs.' + (v||0).toLocaleString('en-IN')
@@ -34,11 +36,23 @@ export default function Payments() {
   async function approvePayment() {
     if (!verifyModal) return
     setSaving(true)
+    const { data: { user } } = await sb.auth.getUser()
     await sb.from('bookings').update({
       payment_status: 'paid',
       payment_confirmed_at: new Date().toISOString(),
       payment_id: refInput.trim() || verifyModal.payment_id || null
     }).eq('id', verifyModal.id)
+    await audit(user?.email || 'admin', AUDIT_ACTIONS.VERIFY_PAYMENT, 'booking', verifyModal.id, {
+      customer: verifyModal.customer_name, amount: verifyModal.amount, ref: refInput.trim()
+    })
+    if (verifyModal.customer_phone) {
+      await notifyPaymentSuccess(verifyModal.customer_phone, null, {
+        customerName: verifyModal.customer_name || '',
+        amount: String(verifyModal.amount || 0),
+        bookingId: verifyModal.id.slice(0,8),
+        service: verifyModal.service || '',
+      })
+    }
     setVerifyModal(null)
     setRefInput('')
     await load()
@@ -48,10 +62,13 @@ export default function Payments() {
 
   async function updatePayment(id, status) {
     setSaving(true)
+    const { data: { user } } = await sb.auth.getUser()
     await sb.from('bookings').update({
       payment_status: status,
       payment_confirmed_at: status==='paid' ? new Date().toISOString() : null
     }).eq('id', id)
+    const action = status==='paid' ? AUDIT_ACTIONS.VERIFY_PAYMENT : status==='refunded' ? AUDIT_ACTIONS.REFUND_PAYMENT : AUDIT_ACTIONS.REJECT_PAYMENT
+    await audit(user?.email || 'admin', action, 'booking', id, { status })
     await load()
     setSelected(s=>s?{...s,payment_status:status}:null)
     setSaving(false)
@@ -135,18 +152,4 @@ export default function Payments() {
                 <tbody>
                   {filtered.map(p=>(
                     <tr key={p.id} onMouseEnter={e=>e.currentTarget.style.background='#f8fafc'} onMouseLeave={e=>e.currentTarget.style.background='#fff'}>
-                      <td style={td}><span style={{ fontFamily:'monospace', fontSize:12, color:'#6366f1' }}>{p.id.slice(0,8)}</span></td>
-                      <td style={td}>
-                        <div style={{ fontWeight:600 }}>{p.customer_name||'-'}</div>
-                        <div style={{ fontSize:11, color:'#94a3b8' }}>{p.customer_phone||'-'}</div>
-                      </td>
-                      <td style={td}>
-                        <div style={{ fontWeight:600 }}>{p.workers?.name||'-'}</div>
-                        <div style={{ fontSize:11, color:'#94a3b8' }}>{p.workers?.phone||'-'}</div>
-                      </td>
-                      <td style={td}>{p.service||'-'}</td>
-                      <td style={td}><span style={{ fontWeight:700, fontSize:15 }}>{INR(p.amount)}</span></td>
-                      <td style={td}>{p.payment_method||'UPI'}</td>
-                      <td style={td}><span style={{ fontFamily:'monospace', fontSize:11, color:'#6366f1' }}>{p.payment_id||'—'}</span></td>
-                      <td style={td}>
- 
+                      <td style={td}><span style={{ fontFamily:'monospace', fontSize:12, color:'#6366f1' 

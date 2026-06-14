@@ -5,6 +5,8 @@ import Badge from '../components/Badge'
 import Modal from '../components/Modal'
 import Loader from '../components/Loader'
 import { exportCSV, exportExcel } from '../lib/export'
+import { audit, AUDIT_ACTIONS } from '../lib/audit'
+import { notifyPayoutReleased } from '../lib/notify'
 
 const fmt = d => d ? new Date(d).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '-'
 const INR = v => 'Rs.' + (v||0).toLocaleString('en-IN')
@@ -40,11 +42,25 @@ export default function Payouts() {
     if (!payNow) return
     if (!utrInput.trim()) { alert('Please enter the UTR / transaction reference number.'); return }
     setSaving(true)
+    const { data: { user } } = await sb.auth.getUser()
     await sb.from('payouts').update({
       status: 'paid',
       utr: utrInput.trim(),
       paid_at: new Date().toISOString()
     }).eq('id', payNow.id)
+    // Audit log
+    await audit(user?.email || 'admin', AUDIT_ACTIONS.RELEASE_PAYOUT, 'payout', payNow.id, {
+      worker: payNow.workers?.name, amount: payNow.amount, utr: utrInput.trim()
+    })
+    // Notify worker via SMS + WhatsApp
+    if (payNow.workers?.phone) {
+      await notifyPayoutReleased(payNow.workers.phone, {
+        workerName: payNow.workers.name || '',
+        amount: String(payNow.amount || 0),
+        upiId: payNow.workers.upi_id || '—',
+        utr: utrInput.trim(),
+      })
+    }
     setPayNow(null)
     setUtrInput('')
     await load()
@@ -53,7 +69,9 @@ export default function Payouts() {
 
   async function failPayout(id) {
     setSaving(true)
+    const { data: { user } } = await sb.auth.getUser()
     await sb.from('payouts').update({ status: 'failed' }).eq('id', id)
+    await audit(user?.email || 'admin', AUDIT_ACTIONS.FAIL_PAYOUT, 'payout', id, {})
     await load()
     setSaving(false)
     setSelected(null)
@@ -175,20 +193,4 @@ export default function Payouts() {
               <div key={n} style={{ display:'flex', alignItems:'center', flex:1 }}>
                 <div style={{ display:'flex', flexDirection:'column', alignItems:'center', flex:1 }}>
                   <div style={{ width:28, height:28, borderRadius:'50%', background:'#6366f1', color:'#fff', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:700, fontSize:13 }}>{n}</div>
-                  <div style={{ fontSize:11, color:'#64748b', marginTop:4, textAlign:'center' }}>{label}</div>
-                </div>
-                {i<2 && <div style={{ height:2, width:32, background:'#e2e8f0', margin:'0 4px', marginBottom:18 }} />}
-              </div>
-            ))}
-          </div>
-
-          {/* Worker info */}
-          <div style={{ background:'#f8fafc', borderRadius:10, padding:'14px 16px', marginBottom:16 }}>
-            <div style={{ fontSize:12, color:'#64748b', fontWeight:600, marginBottom:8 }}>WORKER DETAILS</div>
-            <div style={{ fontWeight:700, fontSize:16, color:'#0f172a', marginBottom:4 }}>{payNow.workers?.name||'—'}</div>
-            <div style={{ fontSize:13, color:'#64748b' }}>{payNow.workers?.phone||'—'}</div>
-          </div>
-
-          {/* UPI ID — big copy box */}
-          <div style={{ marginBottom:16 }}>
- 
+                  <div style={{ fontSize:11, color:'#64748b', marginT
