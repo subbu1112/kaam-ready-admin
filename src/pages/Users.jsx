@@ -18,7 +18,7 @@ export default function Users() {
     setLoading(true)
     const { data } = await sb.from('profiles')
       .select('id,full_name,name,phone,email,alternate_phone,city,state,address,created_at,total_bookings,avatar_url,is_blocked,role')
-      .eq('role','customer')
+      .or('role.eq.customer,role.is.null')
       .order('created_at', { ascending: false })
       .limit(500)
     setUsers(data || [])
