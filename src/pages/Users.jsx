@@ -110,8 +110,20 @@ export default function Users() {
       </div>
       {selected && (
         <Modal title={`User: ${selected.name||'No name'}`} onClose={()=>setSelected(null)} width={700}>
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16, marginBottom:24 }}>
-            {[['Phone',selected.phone],['City',selected.city],['Status',selected.account_status||'active'],['Joined',fmt(selected.created_at)],['Total Bookings',selected.total_bookings||0]].map(([l,v])=>(
+          {/* Contact Info */}
+          <div style={{ background:'#eff6ff', borderRadius:10, padding:'12px 16px', marginBottom:16, border:'1px solid #bfdbfe' }}>
+            <div style={{ fontSize:12, fontWeight:700, color:'#3b82f6', marginBottom:8 }}>📞 Contact Information</div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
+              {[['Phone',selected.phone],['Email',selected.email],['Alternate Phone',selected.alternate_phone],['City',selected.city],['Address',selected.address]].map(([l,v])=>v?(
+                <div key={l} style={{ background:'#fff', borderRadius:7, padding:'8px 12px' }}>
+                  <div style={{ fontSize:10, color:'#94a3b8', fontWeight:600 }}>{l}</div>
+                  <div style={{ fontWeight:600, fontSize:13, color:'#1e293b', marginTop:2 }}>{v}</div>
+                </div>
+              ):null)}
+            </div>
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16, marginBottom:16 }}>
+            {[['Status',selected.account_status||'active'],['Joined',fmt(selected.created_at)],['Total Bookings',selected.total_bookings||0]].map(([l,v])=>(
               <div key={l} style={{ background:'#f8fafc', borderRadius:8, padding:'12px 16px' }}>
                 <div style={{ fontSize:11, color:'#64748b', fontWeight:600, marginBottom:4 }}>{l}</div>
                 <div style={{ fontWeight:700, color:'#0f172a' }}>{v||'-'}</div>
@@ -137,16 +149,4 @@ export default function Users() {
             </table>
           </div>
           <div style={{ display:'flex', gap:8, marginTop:20 }}>
-            {(selected.account_status||'active')==='active' && <button disabled={saving} onClick={()=>updateStatus(selected.id,'suspended')} style={btnS('#f59e0b')}>Suspend User</button>}
-            {(selected.account_status||'active')!=='banned' && <button disabled={saving} onClick={()=>updateStatus(selected.id,'banned')} style={btnS('#ef4444')}>Ban User</button>}
-            {(selected.account_status||'active')!=='active' && <button disabled={saving} onClick={()=>updateStatus(selected.id,'active')} style={btnS('#10b981')}>Restore Access</button>}
-          </div>
-        </Modal>
-      )}
-    </div>
-  )
-}
-
-function btnS(bg, size='md') {
-  return { background:bg, color:'#fff', border:'none', borderRadius: size==='sm' ? 6 : 8, padding: size==='sm' ? '5px 10px' : '9px 16px', fontSize: size==='sm' ? 12 : 13, fontWeight:600, cursor:'pointer', whiteSpace:'nowrap' }
-}
+      

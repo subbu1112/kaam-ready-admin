@@ -128,50 +128,40 @@ export default function Workers() {
       </div>
       {selected && (
         <Modal title={`Worker: ${selected.name||'No name'}`} onClose={()=>setSelected(null)} width={750}>
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12, marginBottom:20 }}>
-            {[['Phone',selected.phone],['Skill',selected.skill],['City',selected.city],['Rating',`${selected.rating||5} / 5`],['Total Jobs',selected.total_jobs||0],['Wallet',INR(selected.wallet_balance)],['UPI ID',selected.upi_id||'-'],['Bank',selected.bank_account||'-'],['IFSC',selected.bank_ifsc||'-'],['KYC Status',selected.kyc_status||'pending'],['Joined',fmt(selected.created_at)]].map(([l,v])=>(
+          {/* Contact Info */}
+          <div style={{ background:'#eff6ff', borderRadius:10, padding:'12px 16px', marginBottom:16, border:'1px solid #bfdbfe' }}>
+            <div style={{ fontSize:12, fontWeight:700, color:'#3b82f6', marginBottom:8 }}>📞 Contact Information</div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
+              {[['Phone',selected.phone],['Email',selected.email],['Alternate Phone',selected.alternate_phone],['Address',selected.address],['City',selected.city],['Working Hours',selected.working_hours_start&&selected.working_hours_end?`${selected.working_hours_start} – ${selected.working_hours_end}`:null]].map(([l,v])=>v?(
+                <div key={l} style={{ background:'#fff', borderRadius:7, padding:'8px 12px' }}>
+                  <div style={{ fontSize:10, color:'#94a3b8', fontWeight:600 }}>{l}</div>
+                  <div style={{ fontWeight:600, fontSize:13, color:'#1e293b', marginTop:2 }}>{v}</div>
+                </div>
+              ):null)}
+            </div>
+          </div>
+
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12, marginBottom:16 }}>
+            {[['Rating',`${selected.rating||5} / 5`],['Total Jobs',selected.total_jobs||0],['Wallet',INR(selected.wallet_balance)],['Skill',selected.skill],['UPI ID',selected.upi_id||'-'],['Bank',selected.bank_account||'-'],['IFSC',selected.bank_ifsc||'-'],['Aadhaar No.',selected.aadhaar_number||'-'],['PAN No.',selected.pan_number||'-'],['KYC Status',selected.kyc_status||'pending'],['Service Radius',selected.service_radius_km?(selected.service_radius_km+' km'):'-'],['Joined',fmt(selected.created_at)]].map(([l,v])=>(
               <div key={l} style={{ background:'#f8fafc', borderRadius:8, padding:'10px 14px' }}>
                 <div style={{ fontSize:11, color:'#64748b', fontWeight:600, marginBottom:3 }}>{l}</div>
                 <div style={{ fontWeight:700, fontSize:13 }}>{v||'-'}</div>
               </div>
             ))}
           </div>
-          {(selected.aadhar_front_url||selected.aadhaar_front_url||selected.selfie_url) && (
+
+          {/* KYC document status */}
+          <div style={{ display:'flex', gap:8, marginBottom:16, flexWrap:'wrap' }}>
+            <span style={{ fontSize:12, fontWeight:700, padding:'4px 10px', borderRadius:6, background:selected.aadhar_verified?'#D1FAE5':'#FEF3C7', color:selected.aadhar_verified?'#065F46':'#92400E' }}>
+              Aadhaar: {selected.aadhar_verified?'✓ Verified':selected.aadhar_submitted?'⏳ Submitted':'✗ Not submitted'}
+            </span>
+            <span style={{ fontSize:12, fontWeight:700, padding:'4px 10px', borderRadius:6, background:selected.pan_verified?'#D1FAE5':'#FEF3C7', color:selected.pan_verified?'#065F46':'#92400E' }}>
+              PAN: {selected.pan_verified?'✓ Verified':selected.pan_submitted?'⏳ Submitted':'✗ Not submitted'}
+            </span>
+          </div>
+
+          {(selected.aadhar_front_url||selected.aadhaar_front_url||selected.pan_front_url||selected.selfie_url) && (
             <div style={{ marginBottom:20 }}>
-              <h4 style={{ fontWeight:700, marginBottom:10 }}>Documents</h4>
+              <h4 style={{ fontWeight:700, marginBottom:10 }}>KYC Documents</h4>
               <div style={{ display:'flex', gap:12, flexWrap:'wrap' }}>
-                {[['Aadhaar Front',selected.aadhar_front_url||selected.aadhaar_front_url],['Aadhaar Back',selected.aadhar_back_url||selected.aadhaar_back_url],['Selfie',selected.selfie_url]].filter(([,url])=>url).map(([label,url])=>(
-                  <a key={label} href={url} target="_blank" rel="noreferrer" style={{ display:'block', background:'#f1f5f9', borderRadius:8, padding:'10px 16px', fontSize:13, color:'#6366f1', fontWeight:600, textDecoration:'none' }}>View {label}</a>
-                ))}
-              </div>
-            </div>
-          )}
-          <h4 style={{ fontWeight:700, marginBottom:10 }}>Job History ({bookings.length})</h4>
-          <div style={{ maxHeight:220, overflowY:'auto', border:'1px solid #e2e8f0', borderRadius:8, marginBottom:20 }}>
-            <table>
-              <thead><tr>{['Service','Status','Amount','Date'].map(h=><th key={h} style={{...th,background:'#fff'}}>{h}</th>)}</tr></thead>
-              <tbody>
-                {bookings.slice(0,20).map(b=>(
-                  <tr key={b.id}>
-                    <td style={td}>{b.service}</td>
-                    <td style={td}><Badge status={b.status} /></td>
-                    <td style={td}>{INR(b.amount)}</td>
-                    <td style={td}>{fmt(b.created_at)}</td>
-                  </tr>
-                ))}
-                {!bookings.length && <tr><td colSpan={4} style={{ padding:20, textAlign:'center', color:'#94a3b8' }}>No jobs yet</td></tr>}
-              </tbody>
-            </table>
-          </div>
-          <div style={{ display:'flex', gap:8 }}>
-            {selected.kyc_status==='pending' && <>
-              <button disabled={saving} onClick={()=>updateKYC(selected.id,'approved')} style={btnS('#10b981')}>Approve KYC</button>
-              <button disabled={saving} onClick={()=>updateKYC(selected.id,'rejected')} style={btnS('#ef4444')}>Reject KYC</button>
-            </>}
-            {(selected.account_status||'active')==='active' ? <button disabled={saving} onClick={()=>updateStatus(selected.id,'suspended')} style={btnS('#f59e0b')}>Suspend Worker</button> : <button disabled={saving} onClick={()=>updateStatus(selected.id,'active')} style={btnS('#10b981')}>Restore Access</button>}
-          </div>
-        </Modal>
-      )}
-    </div>
-  )
-}
+                {[['Aadhaar Front',selected.aadhar_front_url||selected.aadhaar_front_url],['Aadhaar Back',selected.aadhar_back_url||selected.aadhaar_back_url],['PAN Card',selected.pan_front_url],['Selfie',selected.selfie_url]].filte
