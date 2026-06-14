@@ -1,260 +1,117 @@
-import { useEffect, useState } from 'react'
+import { useState, useEffect } from 'react'
 import { sb } from '../lib/supabase'
-import { SERVICES } from '../constants'
-import Btn from '../components/Btn'
+const Y='#F5C000'
+const STATUS_COLOR = { searching:'#f59e0b', assigned:'#3b82f6', priced:'#8b5cf6', completed:'#22c55e', cancelled:'#6b7280', scheduled:'#06b6d4' }
+const FILTERS = ['all','searching','assigned','priced','completed','cancelled']
 
-const SVC_COLORS = {
-  elec:{bg:'#FFF9E6'},plumb:{bg:'#EFF6FF'},clean:{bg:'#ECFDF5'},carpen:{bg:'#FFF7ED'},
-  paint:{bg:'#F5F3FF'},pest:{bg:'#FFF1F2'},mech:{bg:'#F1F5F9'},labor:{bg:'#EFF6FF'},emerg:{bg:'#FFF1F2'},
-}
-const STATUS_CFG = {
-  completed: { bg:'#D1FAE5', c:'#065F46', label:'✓ Done',         dot:'#10B981' },
-  searching:  { bg:'#FFF8D6', c:'#B8900A', label:'Searching...',   dot:'#F5C000' },
-  assigned:   { bg:'#DBEAFE', c:'#1E40AF', label:'Active',         dot:'#3B82F6' },
-  priced:     { bg:'#FEF3C7', c:'#92400E', label:'💳 Pay Now',     dot:'#F59E0B' },
-  cancelled:  { bg:'#FEE2E2', c:'#991B1B', label:'Cancelled',      dot:'#EF4444' },
-  scheduled:  { bg:'#EDE9FE', c:'#5B21B6', label:'📅 Scheduled',   dot:'#7C3AED' },
-}
-const FILTERS = [
-  { id:'all',    label:'All'     },
-  { id:'active', label:'Active'  },
-  { id:'done',   label:'Done'    },
-]
-
-export default function BookingsScreen({ user, setTab, setSelSvc, setRebookWorker, showToast }) {
+export default function BookingsScreen() {
+  const [filter,   setFilter]   = useState('all')
   const [bookings, setBookings] = useState([])
   const [loading,  setLoading]  = useState(true)
-  const [filter,   setFilter]   = useState('all')
-  const [reportFor, setReportFor] = useState(null)
-  const [reason,    setReason]    = useState('')
-  const [busy,      setBusy]      = useState(false)
+  const [sel,      setSel]      = useState(null)
+  const [busy,     setBusy]     = useState(false)
 
-  useEffect(() => { if (user?.id) load(user.id) }, [user?.id])
+  useEffect(() => { load() }, [filter])
 
-  async function load(uid) {
+  async function load() {
     setLoading(true)
-    const { data } = await sb.from('bookings').select('*')
-      .eq('user_id', uid).order('created_at', { ascending:false })
-    if (data) setBookings(data)
+    let q = sb.from('bookings').select('*').order('created_at',{ascending:false}).limit(60)
+    if (filter !== 'all') q = q.eq('status', filter)
+    const { data } = await q
+    setBookings(data||[])
     setLoading(false)
   }
 
-  async function rebook(b) {
-    if (!b.worker_id) return
-    const { data: w } = await sb.from('workers').select('*').eq('id', b.worker_id).single()
-    if (!w) { showToast && showToast('Worker not found'); return }
-    setRebookWorker(w)
-    setSelSvc(SERVICES.find(s=>s.id===b.service_id) || { id:b.service_id, lbl:b.service, ico:'🔧', range:'' })
-    setTab('book')
-  }
-
-  async function submitReport() {
-    if (!reason.trim() || busy) return
+  async function forceComplete(b) {
+    if (!confirm(`Mark booking #${b.id.slice(-6)} as completed?`)) return
     setBusy(true)
-    const { error } = await sb.from('disputes').insert({
-      booking_id:reportFor.id, raised_by:user.id, raised_by_role:'customer',
-      reason:reason.trim(), status:'open',
-    })
+    await sb.from('bookings').update({ status:'completed', payment_status:'paid', completed_at: new Date().toISOString() }).eq('id', b.id)
+    showToast && showToast('Booking marked complete')
+    setSel(null); load()
     setBusy(false)
-    if (error) { showToast && showToast(error.message); return }
-    setReportFor(null); setReason('')
-    showToast && showToast('Reported — our team will reach out ✓')
   }
 
-  const filtered = bookings.filter(b => {
-    if (filter==='active') return ['searching','assigned','priced','scheduled'].includes(b.status)
-    if (filter==='done')   return ['completed','cancelled'].includes(b.status)
-    return true
-  })
+  async function forceCancel(b) {
+    if (!confirm(`Cancel booking #${b.id.slice(-6)}?`)) return
+    setBusy(true)
+    await sb.from('bookings').update({ status:'cancelled' }).eq('id', b.id)
+    setSel(null); load()
+    setBusy(false)
+  }
 
-  function getSvc(b) { return SERVICES.find(s=>s.lbl===b.service) }
+  async function confirmPayment(b) {
+    setBusy(true)
+    await sb.from('bookings').update({ status:'completed', payment_status:'paid', payment_confirmed_at: new Date().toISOString(), completed_at: new Date().toISOString() }).eq('id', b.id)
+    setSel(null); load()
+    setBusy(false)
+  }
 
   return (
-    <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden', background:'#F5F5F8' }}>
-
-      {/* Header */}
-      <div style={{ background:'#fff', padding:'52px 20px 0', borderBottom:'1px solid #F0F0F2', flexShrink:0 }}>
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
-          <h1 style={{ fontSize:22, fontWeight:800, color:'#1A1A1A' }}>My Bookings</h1>
-          <span style={{ background:'#F5F5F8', color:'#6B7280', fontSize:12, fontWeight:700,
-            padding:'4px 10px', borderRadius:20 }}>
-            {bookings.length} total
-          </span>
-        </div>
-        {/* Filter tabs */}
-        <div style={{ display:'flex', gap:6, paddingBottom:1 }}>
-          {FILTERS.map(f => (
-            <button key={f.id} type="button" onClick={() => setFilter(f.id)}
-              style={{
-                padding:'8px 16px', borderRadius:20, border:'none', cursor:'pointer',
-                fontFamily:'inherit', fontWeight:700, fontSize:13, transition:'.15s',
-                background: filter===f.id ? '#F5C000' : '#F5F5F8',
-                color: filter===f.id ? '#1A1A1A' : '#6B7280',
-              }}>
-              {f.label}
+    <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden', background:'#0A0A0A' }}>
+      <div style={{ background:'#111', padding:'16px 16px 0', borderBottom:'1px solid #1a1a1a', flexShrink:0 }}>
+        <p style={{ color:'#fff', fontWeight:900, fontSize:18, marginBottom:12 }}>📋 Bookings</p>
+        <div style={{ display:'flex', gap:6, overflowX:'auto', paddingBottom:12 }}>
+          {FILTERS.map(f=>(
+            <button key={f} onClick={()=>setFilter(f)}
+              style={{ padding:'5px 12px', borderRadius:20, border:'none', background:filter===f?Y:'#1a1a1a', color:filter===f?'#000':'#888', fontSize:11, fontWeight:700, cursor:'pointer', fontFamily:'inherit', flexShrink:0, textTransform:'capitalize' }}>
+              {f}
             </button>
           ))}
         </div>
       </div>
 
-      {/* Report modal */}
-      {reportFor && (
-        <div role="dialog" aria-modal="true" style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.5)', zIndex:999,
-          display:'flex', alignItems:'flex-end', justifyContent:'center' }}>
-          <div style={{ background:'#fff', borderRadius:'24px 24px 0 0', width:'100%', maxWidth:430,
-            padding:'20px 20px 40px', animation:'slideUp .3s ease' }}>
-            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}>
-              <p style={{ fontWeight:800, fontSize:18 }}>⚠️ Report a Problem</p>
-              <button type="button" onClick={() => { setReportFor(null); setReason('') }}
-                style={{ background:'#F5F5F8', border:'none', borderRadius:10, padding:'6px 12px',
-                  cursor:'pointer', fontFamily:'inherit', fontWeight:600, fontSize:13 }}>
-                Close
-              </button>
+      <div style={{ flex:1, overflowY:'auto', padding:'12px 16px 80px' }}>
+        {loading ? <p style={{ color:'#555', textAlign:'center', padding:32 }}>Loading…</p> :
+         bookings.length===0 ? <p style={{ color:'#555', textAlign:'center', padding:32 }}>No bookings</p> :
+         bookings.map(b => (
+          <div key={b.id} onClick={()=>setSel(b===sel?null:b)}
+            style={{ background:'#111', borderRadius:14, border:`1px solid ${sel?.id===b.id?Y:'#1a1a1a'}`, padding:'12px 14px', marginBottom:8, cursor:'pointer' }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
+              <div style={{ flex:1 }}>
+                <p style={{ color:'#fff', fontWeight:700, fontSize:14 }}>{b.service||'—'} · {b.city}</p>
+                <p style={{ color:'#555', fontSize:11, marginTop:3 }}>
+                  #{b.id.slice(-6)} · {new Date(b.created_at).toLocaleString('en-IN',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}
+                </p>
+                {b.amount && <p style={{ color:Y, fontWeight:800, fontSize:13, marginTop:4 }}>₹{b.amount}</p>}
+              </div>
+              <div style={{ display:'flex', flexDirection:'column', gap:4, alignItems:'flex-end' }}>
+                <span style={{ background:STATUS_COLOR[b.status]+'22', color:STATUS_COLOR[b.status], fontSize:10, fontWeight:700, padding:'3px 8px', borderRadius:6, textTransform:'uppercase' }}>{b.status}</span>
+                {b.payment_status && <span style={{ background:'#1a1a1a', color:'#888', fontSize:10, padding:'2px 6px', borderRadius:4 }}>{b.payment_status}</span>}
+              </div>
             </div>
-            <p style={{ fontSize:12, color:'#9CA3AF', marginBottom:12 }}>
-              {reportFor.service} · {reportFor.amount ? '₹'+reportFor.amount : ''}
-            </p>
-            <textarea value={reason} onChange={e => setReason(e.target.value)} rows={3}
-              placeholder="What went wrong? e.g. charged more than agreed, poor work quality..."
-              style={{ width:'100%', border:'1.5px solid #EBEBEB', borderRadius:13, padding:13,
-                fontSize:14, outline:'none', fontFamily:'inherit', resize:'none', marginBottom:14,
-                background:'#FAFAFA', boxSizing:'border-box' }} />
-            <button type="button" onClick={submitReport} disabled={busy}
-              style={{ width:'100%', background:'#EF4444', color:'#fff', border:'none', borderRadius:14,
-                padding:15, fontWeight:800, fontSize:14, cursor:'pointer', fontFamily:'inherit',
-                opacity:busy?.6:1 }}>
-              {busy ? 'Sending...' : 'Submit Report'}
-            </button>
-          </div>
-        </div>
-      )}
 
-      {/* List */}
-      <div style={{ flex:1, overflowY:'auto', padding:16, display:'flex', flexDirection:'column', gap:10 }}>
-        {loading ? (
-          <div style={{ textAlign:'center', padding:'48px 24px' }}>
-            <div style={{ width:48, height:48, borderRadius:'50%', border:'3px solid #F5C000',
-              borderTopColor:'transparent', margin:'0 auto 16px', animation:'spin .8s linear infinite' }} />
-            <p style={{ color:'#9CA3AF', fontSize:14 }}>Loading bookings...</p>
-          </div>
-        ) : filtered.length===0 ? (
-          <div style={{ textAlign:'center', padding:'56px 24px' }}>
-            <div style={{ fontSize:56, marginBottom:16 }}>📋</div>
-            <p style={{ fontWeight:800, fontSize:18, color:'#1A1A1A' }}>
-              {filter==='all' ? 'No bookings yet' : `No ${filter} bookings`}
-            </p>
-            <p style={{ fontSize:13, color:'#9CA3AF', margin:'8px 0 24px' }}>
-              {filter==='all' ? 'Book your first service to get started' : 'Nothing here right now'}
-            </p>
-            {filter==='all' && <Btn label="Book Now →" onClick={() => setTab('home')}
-              style={{ width:'auto', padding:'13px 28px', margin:'0 auto', display:'block' }} />}
-          </div>
-        ) : filtered.map(b => {
-          const st  = STATUS_CFG[b.status] || STATUS_CFG.searching
-          const svc = getSvc(b)
-          const c   = SVC_COLORS[svc?.id] || { bg:'#F5F5F8' }
-          const isActive = ['searching','assigned','priced','scheduled'].includes(b.status)
-          return (
-            <div key={b.id} style={{
-              background:'#fff', borderRadius:18,
-              boxShadow:'0 1px 3px rgba(0,0,0,.05), 0 4px 14px rgba(0,0,0,.04)',
-              border: isActive ? '2px solid #F5C000' : '1px solid #F0F0F2',
-              overflow:'hidden',
-            }}>
-              {/* Card header */}
-              <div style={{ padding:'14px 16px', display:'flex', alignItems:'flex-start', gap:12 }}>
-                <div style={{ width:46, height:46, borderRadius:14, background:c.bg,
-                  display:'flex', alignItems:'center', justifyContent:'center', fontSize:24, flexShrink:0 }}>
-                  {svc?.ico||'🔧'}
+            {sel?.id===b.id && (
+              <div style={{ marginTop:12, paddingTop:12, borderTop:'1px solid #222' }}>
+                <div style={{ fontSize:12, color:'#555', lineHeight:1.8 }}>
+                  <p><span style={{color:'#888'}}>Customer:</span> {b.user_id?.slice(-8)||'—'}</p>
+                  <p><span style={{color:'#888'}}>Worker:</span> {b.worker_id?.slice(-8)||'Not assigned'}</p>
+                  <p><span style={{color:'#888'}}>Address:</span> {b.address||'—'}</p>
+                  {b.price_note && <p><span style={{color:'#888'}}>Note:</span> {b.price_note}</p>}
                 </div>
-                <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:8 }}>
-                    <p style={{ fontSize:15, fontWeight:700, color:'#1A1A1A' }}>{b.service}</p>
-                    <span style={{ background:st.bg, color:st.c, fontSize:11, fontWeight:700,
-                      padding:'4px 10px', borderRadius:20, flexShrink:0 }}>
-                      {st.label}
-                    </span>
-                  </div>
-                  <p style={{ fontSize:12, color:'#9CA3AF', marginTop:3 }}>
-                    {new Date(b.created_at).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})}
-                    {b.is_scheduled && b.scheduled_at && (
-                      <span style={{ marginLeft:6, color:'#7C3AED' }}>
-                        · 📅 {new Date(b.scheduled_at).toLocaleString('en-IN',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}
-                      </span>
-                    )}
-                  </p>
+                <div style={{ display:'flex', gap:8, marginTop:12 }}>
+                  {b.payment_status==='claimed' && (
+                    <button onClick={e=>{e.stopPropagation();confirmPayment(b)}} disabled={busy}
+                      style={{ flex:1, background:'#22c55e', border:'none', borderRadius:10, padding:'10px 0', color:'#fff', fontWeight:800, fontSize:13, cursor:'pointer', fontFamily:'inherit' }}>
+                      ✓ Confirm Payment
+                    </button>
+                  )}
+                  {b.status!=='completed' && b.status!=='cancelled' && (
+                    <button onClick={e=>{e.stopPropagation();forceComplete(b)}} disabled={busy}
+                      style={{ flex:1, background:'#1a1a1a', border:'1px solid #3b82f6', borderRadius:10, padding:'10px 0', color:'#3b82f6', fontWeight:700, fontSize:12, cursor:'pointer', fontFamily:'inherit' }}>
+                      Force Complete
+                    </button>
+                  )}
+                  {b.status!=='completed' && b.status!=='cancelled' && (
+                    <button onClick={e=>{e.stopPropagation();forceCancel(b)}} disabled={busy}
+                      style={{ flex:1, background:'#1a1a1a', border:'1px solid #ef4444', borderRadius:10, padding:'10px 0', color:'#ef4444', fontWeight:700, fontSize:12, cursor:'pointer', fontFamily:'inherit' }}>
+                      Cancel
+                    </button>
+                  )}
                 </div>
               </div>
-
-              {/* Worker row */}
-              {b.worker?.name && (
-                <div style={{ margin:'0 16px 12px', display:'flex', alignItems:'center', gap:10,
-                  background:'#FAFAFA', borderRadius:12, padding:'10px 12px' }}>
-                  <div style={{ width:34, height:34, borderRadius:10, background:'#FFF8D6',
-                    display:'flex', alignItems:'center', justifyContent:'center', fontSize:18 }}>
-                    {b.worker.ico||'👷'}
-                  </div>
-                  <div style={{ flex:1 }}>
-                    <p style={{ fontSize:13, fontWeight:700, color:'#1A1A1A' }}>{b.worker.name}</p>
-                    <p style={{ fontSize:11, color:'#9CA3AF' }}>
-                      {b.worker.skill} · ★ {b.worker.rating||'5.0'}
-                    </p>
-                  </div>
-                  {b.worker.phone && (
-                    <a href={'tel:+91'+b.worker.phone}
-                      style={{ width:34, height:34, borderRadius:10, background:'#D1FAE5',
-                        display:'flex', alignItems:'center', justifyContent:'center',
-                        fontSize:16, textDecoration:'none' }}>
-                      📞
-                    </a>
-                  )}
-                </div>
-              )}
-
-              {/* Address */}
-              {b.address && (
-                <p style={{ fontSize:12, color:'#9CA3AF', padding:'0 16px', marginBottom:10 }}>
-                  📍 {b.address}
-                </p>
-              )}
-
-              {/* Actions + amount */}
-              {(b.status==='completed' || b.status==='cancelled' || b.amount > 0) && (
-                <div style={{ borderTop:'1px solid #F0F0F2', padding:'12px 16px',
-                  display:'flex', justifyContent:'space-between', alignItems:'center', gap:8 }}>
-                  <div style={{ display:'flex', gap:8, flex:1 }}>
-                    {b.worker_id && b.status==='completed' && (
-                      <button type="button" onClick={() => rebook(b)}
-                        style={{ flex:1, background:'#FFF8D6', color:'#B8900A', border:'none',
-                          borderRadius:12, padding:'9px 8px', fontWeight:700, fontSize:12,
-                          cursor:'pointer', fontFamily:'inherit' }}>
-                        🔁 Rebook
-                      </button>
-                    )}
-                    {b.status==='completed' && (
-                      <button type="button" onClick={() => setReportFor(b)}
-                        style={{ flex:1, background:'#FEE2E2', color:'#991B1B', border:'none',
-                          borderRadius:12, padding:'9px 8px', fontWeight:700, fontSize:12,
-                          cursor:'pointer', fontFamily:'inherit' }}>
-                        ⚠️ Report
-                      </button>
-                    )}
-                  </div>
-                  {b.amount > 0 && (
-                    <p style={{ fontSize:16, fontWeight:800, color:'#B8900A', flexShrink:0 }}>₹{b.amount}</p>
-                  )}
-                </div>
-              )}
-
-              {b.rating > 0 && (
-                <div style={{ padding:'0 16px 12px' }}>
-                  <span style={{ fontSize:14, color:'#F59E0B' }}>{'★'.repeat(b.rating)}{'☆'.repeat(5-b.rating)}</span>
-                </div>
-              )}
-            </div>
-          )
-        })}
-        <div style={{ height:8 }} />
+            )}
+          </div>
+        ))}
       </div>
     </div>
   )
