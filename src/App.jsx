@@ -3,15 +3,18 @@ import { sb } from './lib/supabase'
 import Login   from './pages/Login'
 import Sidebar from './components/Sidebar'
 
-const Dashboard = lazy(() => import('./pages/Dashboard'))
-const Users     = lazy(() => import('./pages/Users'))
-const Workers   = lazy(() => import('./pages/Workers'))
-const Bookings  = lazy(() => import('./pages/Bookings'))
-const Payments  = lazy(() => import('./pages/Payments'))
-const Payouts   = lazy(() => import('./pages/Payouts'))
-const Support   = lazy(() => import('./pages/Support'))
-const Reports   = lazy(() => import('./pages/Reports'))
-const Logs      = lazy(() => import('./pages/Logs'))
+const Dashboard    = lazy(() => import('./pages/Dashboard'))
+const Users        = lazy(() => import('./pages/Users'))
+const Workers      = lazy(() => import('./pages/Workers'))
+const Bookings     = lazy(() => import('./pages/Bookings'))
+const Payments     = lazy(() => import('./pages/Payments'))
+const Payouts      = lazy(() => import('./pages/Payouts'))
+const Support      = lazy(() => import('./pages/Support'))
+const ReportsInbox = lazy(() => import('./pages/ReportsInbox'))
+const Analytics    = lazy(() => import('./pages/Reports'))
+const Referrals    = lazy(() => import('./pages/Referrals'))
+const CMS          = lazy(() => import('./pages/CMS'))
+const Logs         = lazy(() => import('./pages/Logs'))
 
 function PageLoader() {
   return (
@@ -47,7 +50,20 @@ export default function App() {
 
   if (!user) return <Login onLogin={setUser} />
 
-  const pages = { dashboard:<Dashboard />, users:<Users />, workers:<Workers />, bookings:<Bookings />, payments:<Payments />, payouts:<Payouts />, support:<Support />, reports:<Reports />, logs:<Logs /> }
+  const pages = {
+    dashboard:    <Dashboard />,
+    users:        <Users />,
+    workers:      <Workers />,
+    bookings:     <Bookings />,
+    payments:     <Payments />,
+    payouts:      <Payouts />,
+    support:      <Support />,
+    reportsinbox: <ReportsInbox />,
+    referrals:    <Referrals />,
+    cms:          <CMS />,
+    analytics:    <Analytics />,
+    logs:         <Logs />,
+  }
 
   return (
     <div style={{ display:'flex', height:'100vh', background:'#f1f5f9', overflow:'hidden' }}>
