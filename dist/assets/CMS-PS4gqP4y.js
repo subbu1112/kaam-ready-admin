@@ -1,4 +1,4 @@
-import{r as i,s as o,j as a}from"./index-CdHURacI.js";import{T,L as E}from"./Loader-CGsIYohr.js";const r=[{id:"terms",label:"Terms & Conditions",ico:"📜"},{id:"privacy",label:"Privacy Policy",ico:"🔒"},{id:"refund",label:"Cancellation & Refund Policy",ico:"↩️"}],h={terms:`TERMS & CONDITIONS
+import{r as i,s as o,j as a}from"./index-BUkpphjY.js";import{T,L as E}from"./Loader-CIDUfd2Y.js";const r=[{id:"terms",label:"Terms & Conditions",ico:"📜"},{id:"privacy",label:"Privacy Policy",ico:"🔒"},{id:"refund",label:"Cancellation & Refund Policy",ico:"↩️"}],h={terms:`TERMS & CONDITIONS
 
 Last updated: June 2025
 
