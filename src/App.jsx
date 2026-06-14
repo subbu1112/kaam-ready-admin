@@ -1,95 +1,84 @@
-import { useState, useEffect, Component } from 'react'
+import { useState, useEffect } from 'react'
 import { sb } from './lib/supabase'
-import LoginScreen    from './screens/LoginScreen'
-import DashboardScreen from './screens/DashboardScreen'
-import BookingsScreen  from './screens/BookingsScreen'
-import WorkersScreen   from './screens/WorkersScreen'
+import LoginPage    from './pages/Login'
+import Dashboard    from './pages/Dashboard'
+import Users        from './pages/Users'
+import Workers      from './pages/Workers'
+import Bookings     from './pages/Bookings'
+import Payments     from './pages/Payments'
+import Payouts      from './pages/Payouts'
+import Support      from './pages/Support'
+import Reports      from './pages/Reports'
+import Sidebar      from './components/Sidebar'
+import TopBar       from './components/TopBar'
 
-class TabErrorBoundary extends Component {
-  constructor(props) { super(props); this.state = { error: null } }
-  static getDerivedStateFromError(error) { return { error } }
-  componentDidCatch(error, info) { console.error('Admin tab crash:', error, info) }
-  render() {
-    if (this.state.error) {
-      return (
-        <div style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:32, background:'#0A0A0A' }}>
-          <p style={{ fontSize:36, marginBottom:12 }}>⚠️</p>
-          <p style={{ color:'#fff', fontWeight:800, fontSize:16, marginBottom:8 }}>Something went wrong</p>
-          <p style={{ color:'#555', fontSize:13, marginBottom:20 }}>{this.state.error?.message || 'Unknown error'}</p>
-          <button onClick={() => this.setState({ error: null })}
-            style={{ background:'#F5C000', border:'none', borderRadius:12, padding:'12px 28px', fontWeight:800, cursor:'pointer', fontFamily:'inherit' }}>
-            Try Again
-          </button>
-        </div>
-      )
-    }
-    return this.props.children
-  }
+const PAGES = {
+  dashboard: Dashboard,
+  users:     Users,
+  workers:   Workers,
+  bookings:  Bookings,
+  payments:  Payments,
+  payouts:   Payouts,
+  support:   Support,
+  reports:   Reports,
 }
 
-const TABS = [
-  { id:'dashboard', label:'Dashboard', icon:'📊' },
-  { id:'bookings',  label:'Bookings',  icon:'📋' },
-  { id:'workers',   label:'Workers',   icon:'👷' },
-]
-
 export default function App() {
-  const [session, setSession] = useState(null)
-  const [tab,     setTab]     = useState('dashboard')
-  const [loading, setLoading] = useState(true)
+  const [session,  setSession]  = useState(null)
+  const [checking, setChecking] = useState(true)
+  const [page,     setPage]     = useState('dashboard')
+  const [toast,    setToast]    = useState(null)
 
   useEffect(() => {
     sb.auth.getSession().then(({ data }) => {
       setSession(data.session)
-      setLoading(false)
+      setChecking(false)
     })
-    const { data: { subscription } } = sb.auth.onAuthStateChange((_e, s) => {
-      setSession(s)
-    })
+    const { data: { subscription } } = sb.auth.onAuthStateChange((_e, s) => setSession(s))
     return () => subscription.unsubscribe()
   }, [])
 
-  if (loading) {
-    return (
-      <div style={{ height:'100vh', display:'flex', alignItems:'center', justifyContent:'center', background:'#0A0A0A' }}>
-        <p style={{ color:'#555', fontSize:14 }}>Loading…</p>
-      </div>
-    )
+  function showToast(msg, type = 'success') {
+    setToast({ msg, type })
+    setTimeout(() => setToast(null), 3500)
   }
 
-  if (!session) return <LoginScreen onLogin={setSession} />
+  if (checking) return (
+    <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100vh', background:'#0F172A' }}>
+      <div style={{ color:'#F5C000', fontSize:32, fontWeight:800 }}>⚡ KaamReady Admin</div>
+    </div>
+  )
+
+  if (!session) return <LoginPage onLogin={s => setSession(s)} showToast={showToast} />
+
+  const PageComponent = PAGES[page] || Dashboard
 
   return (
-    <div style={{ height:'100vh', display:'flex', flexDirection:'column', background:'#0A0A0A', maxWidth:480, margin:'0 auto', overflow:'hidden' }}>
-      {/* Header */}
-      <div style={{ background:'#111', padding:'14px 16px', borderBottom:'1px solid #1a1a1a', display:'flex', alignItems:'center', justifyContent:'space-between', flexShrink:0 }}>
-        <p style={{ color:'#F5C000', fontWeight:900, fontSize:18, letterSpacing:'-0.5px' }}>⚡ KaamReady Admin</p>
-        <button onClick={() => sb.auth.signOut()}
-          style={{ background:'transparent', border:'1px solid #333', borderRadius:8, padding:'5px 12px', color:'#888', fontSize:12, cursor:'pointer', fontFamily:'inherit' }}>
-          Sign Out
-        </button>
-      </div>
-
-      {/* Tab Content */}
+    <div style={{ display:'flex', height:'100vh', background:'#0F172A', overflow:'hidden' }}>
+      <Sidebar page={page} setPage={setPage} />
       <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
-        <TabErrorBoundary key={tab}>
-          {tab==='dashboard' && <DashboardScreen />}
-          {tab==='bookings'  && <BookingsScreen  />}
-          {tab==='workers'   && <WorkersScreen   />}
-        </TabErrorBoundary>
+        <TopBar page={page} session={session} showToast={showToast} />
+        <main style={{ flex:1, overflowY:'auto', padding:'24px 28px' }}>
+          <PageComponent showToast={showToast} />
+        </main>
       </div>
 
-      {/* Tab Bar */}
-      <div style={{ background:'#111', borderTop:'1px solid #1a1a1a', display:'flex', flexShrink:0 }}>
-        {TABS.map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)}
-            style={{ flex:1, background:'transparent', border:'none', padding:'12px 0 10px', cursor:'pointer', fontFamily:'inherit', display:'flex', flexDirection:'column', alignItems:'center', gap:3 }}>
-            <span style={{ fontSize:20 }}>{t.icon}</span>
-            <span style={{ fontSize:10, fontWeight:700, color: tab===t.id ? '#F5C000' : '#555', letterSpacing:'0.3px' }}>{t.label.toUpperCase()}</span>
-            {tab===t.id && <div style={{ width:20, height:2, background:'#F5C000', borderRadius:2 }} />}
-          </button>
-        ))}
-      </div>
+      {/* Toast */}
+      {toast && (
+        <div style={{
+          position:'fixed', bottom:28, right:28, zIndex:9999,
+          background: toast.type === 'error' ? '#ef4444' : '#22c55e',
+          color:'#fff', padding:'12px 20px', borderRadius:12, fontWeight:600,
+          fontSize:14, boxShadow:'0 8px 32px rgba(0,0,0,.4)',
+          animation:'slideUp .25s ease'
+        }}>
+          {toast.msg}
+        </div>
+      )}
+      <style>{`
+        @keyframes slideUp { from { opacity:0; transform:translateY(16px) } to { opacity:1; transform:translateY(0) } }
+        * { box-sizing: border-box; }
+      `}</style>
     </div>
   )
 }
