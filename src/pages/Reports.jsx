@@ -1,162 +1,175 @@
 import { useState, useEffect } from 'react'
 import { sb } from '../lib/supabase'
-import TopBar from '../components/TopBar'
-import Loader from '../components/Loader'
-import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
-import { exportCSV, exportExcel, exportPDF } from '../lib/export'
+import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts'
 
-const INR = v => 'Rs.' + (v||0).toLocaleString('en-IN')
-const fmt = d => d ? new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '-'
-function btnS(bg,size='md') { return { background:bg,color:'#fff',border:'none',borderRadius:size==='sm'?6:8,padding:size==='sm'?'5px 10px':'9px 16px',fontSize:size==='sm'?12:13,fontWeight:600,cursor:'pointer',whiteSpace:'nowrap' } }
+const C = { primary:'#6366F1', success:'#10B981', danger:'#EF4444', warning:'#F59E0B', border:'#E2E8F0', card:'#FFFFFF', muted:'#64748B', text:'#0F172A', bg:'#F0F4FF' }
+const INR = v => '₹' + (v||0).toLocaleString('en-IN')
+const COLORS = ['#6366F1','#10B981','#F59E0B','#EF4444','#3B82F6','#8B5CF6']
 
-export default function Reports() {
-  const [data, setData] = useState(null)
+export default function Reports({ user, showToast }) {
+  const [data,    setData]    = useState(null)
+  const [range,   setRange]   = useState(30)
   const [loading, setLoading] = useState(true)
-  const [reportType, setReportType] = useState('revenue')
-  const [range, setRange] = useState(30)
 
   useEffect(() => { load() }, [range])
 
   async function load() {
     setLoading(true)
-    const since = new Date(); since.setDate(since.getDate()-range)
-    const [bookings, workers, payouts] = await Promise.all([
-      sb.from('bookings').select('*').gte('created_at',since.toISOString()),
-      sb.from('workers').select('id,name,city,skill,total_jobs,rating,wallet_balance,kyc_status'),
-      sb.from('payouts').select('*,workers(name)').gte('created_at',since.toISOString()),
+    const since = new Date(); since.setDate(since.getDate() - range)
+    const iso   = since.toISOString()
+
+    const [bookings, workers, users] = await Promise.all([
+      sb.from('bookings').select('id,status,amount,payment_status,created_at,city,service,worker_id').gte('created_at', iso),
+      sb.from('workers').select('id,created_at,kyc_status,total_jobs,wallet_balance,city,skill'),
+      sb.from('profiles').select('id,created_at'),
     ])
-    const b = bookings.data||[]
-    const w = workers.data||[]
-    const p = payouts.data||[]
 
-    // Revenue by day
-    const dayMap = {}
-    b.forEach(x=>{
-      const d = new Date(x.created_at).toLocaleDateString('en-IN',{month:'short',day:'numeric'})
-      if(!dayMap[d]) dayMap[d]={ date:d, revenue:0, bookings:0, commission:0 }
-      if(x.status==='completed'&&x.amount) { dayMap[d].revenue+=x.amount; dayMap[d].commission+=Math.round(x.amount*0.1) }
-      dayMap[d].bookings++
+    const b = bookings.data || []
+    const w = workers.data  || []
+    const u = users.data    || []
+
+    // Daily trend
+    const days = Array.from({length: Math.min(range,30)}, (_,i)=>{
+      const d = new Date(); d.setDate(d.getDate() - (Math.min(range,30)-1-i))
+      return { date: d.toLocaleDateString('en-IN',{month:'short',day:'numeric'}), full: d.toDateString() }
     })
-    const revenueByDay = Object.values(dayMap).slice(-range)
+    const dailyTrend = days.map(d=>({
+      date:     d.date,
+      bookings: b.filter(x=>new Date(x.created_at).toDateString()===d.full).length,
+      revenue:  b.filter(x=>new Date(x.created_at).toDateString()===d.full&&x.status==='completed').reduce((a,x)=>a+(x.amount||0),0),
+      newUsers: u.filter(x=>new Date(x.created_at).toDateString()===d.full).length,
+    }))
 
-    // City performance
-    const cityMap = {}
-    b.forEach(x=>{ if(x.city){ if(!cityMap[x.city]) cityMap[x.city]={city:x.city,bookings:0,revenue:0,completed:0}; cityMap[x.city].bookings++; if(x.status==='completed'&&x.amount){cityMap[x.city].revenue+=x.amount;cityMap[x.city].completed++} } })
-    const cityPerf = Object.values(cityMap).sort((a,z)=>z.bookings-a.bookings)
-
-    // Worker performance
-    const workerPerf = w.map(wk=>({ name:wk.name||'?', city:wk.city||'-', skill:wk.skill||'-', jobs:wk.total_jobs||0, rating:wk.rating||5, kyc:wk.kyc_status||'pending' })).sort((a,z)=>z.jobs-a.jobs)
+    // City breakdown
+    const cities = {}
+    b.forEach(x=>{ if(x.city) cities[x.city]=(cities[x.city]||0)+1 })
+    const cityData = Object.entries(cities).sort((a,b)=>b[1]-a[1]).slice(0,8).map(([city,count])=>({city,count}))
 
     // Service breakdown
-    const svcMap = {}
-    b.forEach(x=>{ if(x.service){ if(!svcMap[x.service]) svcMap[x.service]={service:x.service,count:0,revenue:0}; svcMap[x.service].count++; if(x.amount&&x.status==='completed') svcMap[x.service].revenue+=x.amount } })
-    const serviceBreakdown = Object.values(svcMap).sort((a,z)=>z.count-a.count)
+    const services = {}
+    b.forEach(x=>{ if(x.service) services[x.service]=(services[x.service]||0)+1 })
+    const serviceData = Object.entries(services).sort((a,b)=>b[1]-a[1]).slice(0,6).map(([name,value])=>({name,value}))
 
-    // Commission report
-    const commissionReport = p.map(x=>({ worker:x.workers?.name||'-', amount:x.amount||0, commission:x.commission_amount||Math.round((x.amount||0)*0.1), status:x.status, date:fmt(x.created_at) }))
+    // Status distribution
+    const statuses = ['searching','assigned','priced','completed','cancelled']
+    const statusData = statuses.map(s=>({ name:s, value:b.filter(x=>x.status===s).length })).filter(x=>x.value>0)
 
-    const totalRevenue = b.filter(x=>x.status==='completed'&&x.amount).reduce((a,x)=>a+(x.amount||0),0)
-    const totalCommission = Math.round(totalRevenue*0.1)
+    // KPIs
+    const completed    = b.filter(x=>x.status==='completed')
+    const revenue      = completed.reduce((a,x)=>a+(x.amount||0),0)
+    const completionR  = b.length ? Math.round(completed.length/b.length*100) : 0
+    const avgTicket    = completed.length ? Math.round(revenue/completed.length) : 0
+    const pendingPay   = b.filter(x=>x.payment_status==='pending_verification').length
+    const newWorkers   = w.filter(x=>new Date(x.created_at)>=since).length
+    const newCustomers = u.filter(x=>new Date(x.created_at)>=since).length
 
-    setData({ revenueByDay, cityPerf, workerPerf, serviceBreakdown, commissionReport, totalRevenue, totalCommission, totalBookings:b.length, completed:b.filter(x=>x.status==='completed').length })
+    setData({ dailyTrend, cityData, serviceData, statusData,
+      kpis:{ revenue, commission:Math.round(revenue*.1), avgTicket, completionR, pendingPay, totalBookings:b.length, newWorkers, newCustomers, completed:completed.length } })
     setLoading(false)
   }
 
-  const REPORTS = ['revenue','workers','cities','services','commission']
-  const th = { padding:'10px 14px',textAlign:'left',fontSize:12,fontWeight:700,color:'#64748b',textTransform:'uppercase',letterSpacing:'0.5px',background:'#f8fafc',borderBottom:'1px solid #e2e8f0' }
-  const td = { padding:'11px 14px',fontSize:13,color:'#1e293b',borderBottom:'1px solid #f1f5f9' }
+  if (loading) return <div style={{ padding:48, textAlign:'center', color:C.muted }}>Loading analytics...</div>
 
-  function exportReport(type) {
-    if (!data) return
-    const reports = {
-      revenue: { rows: data.revenueByDay.map(r=>({Date:r.date,Bookings:r.bookings,Revenue:r.revenue,Commission:r.commission})), name:'revenue_report', title:'Revenue Report' },
-      workers: { rows: data.workerPerf.map(r=>({Name:r.name,City:r.city,Skill:r.skill,Jobs:r.jobs,Rating:r.rating,KYC:r.kyc})), name:'worker_performance', title:'Worker Performance' },
-      cities:  { rows: data.cityPerf.map(r=>({City:r.city,Bookings:r.bookings,Revenue:r.revenue,Completed:r.completed})), name:'city_performance', title:'City Performance' },
-      services:{ rows: data.serviceBreakdown.map(r=>({Service:r.service,Count:r.count,Revenue:r.revenue})), name:'service_breakdown', title:'Service Breakdown' },
-      commission: { rows: data.commissionReport.map(r=>({Worker:r.worker,Amount:r.amount,Commission:r.commission,Status:r.status,Date:r.date})), name:'commission_report', title:'Commission Report' },
-    }
-    const r = reports[reportType]
-    if(type==='csv') exportCSV(r.rows, r.name)
-    else if(type==='excel') exportExcel(r.rows, r.name, r.title)
-    else exportPDF(Object.keys(r.rows[0]||{}), r.rows.map(row=>Object.values(row).map(String)), r.title, r.name)
-  }
+  const { kpis, dailyTrend, cityData, serviceData, statusData } = data
 
   return (
     <div>
-      <TopBar title="Reports & Analytics" subtitle={`Last ${range} days summary`} actions={
-        <div style={{ display:'flex', gap:8 }}>
-          <select value={range} onChange={e=>setRange(Number(e.target.value))} style={{ padding:'8px 12px', border:'1px solid #e2e8f0', borderRadius:8, fontSize:13, outline:'none' }}>
-            <option value={7}>Last 7 days</option>
-            <option value={30}>Last 30 days</option>
-            <option value={90}>Last 90 days</option>
-            <option value={365}>Last year</option>
-          </select>
-          <button onClick={()=>exportReport('csv')} style={btnS('#10b981')}>CSV</button>
-          <button onClick={()=>exportReport('excel')} style={btnS('#3b82f6')}>Excel</button>
-          <button onClick={()=>exportReport('pdf')} style={btnS('#ef4444')}>PDF</button>
+      <div style={{ background:C.card, borderRadius:16, padding:'18px 24px', marginBottom:16, border:'1px solid '+C.border, display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+        <div>
+          <h2 style={{ fontSize:18, fontWeight:800, marginBottom:2 }}>Analytics</h2>
+          <p style={{ fontSize:13, color:C.muted }}>Platform performance overview</p>
         </div>
-      } />
-      <div style={{ padding:32 }}>
-        {loading||!data ? <Loader /> : (<>
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:16, marginBottom:28 }}>
-            {[['Total Bookings',data.totalBookings,'#6366f1'],['Completed',data.completed,'#10b981'],['Total Revenue',INR(data.totalRevenue),'#3b82f6'],['Commission',INR(data.totalCommission),'#8b5cf6']].map(([l,v,c])=>(
-              <div key={l} style={{ background:'#fff', borderRadius:10, padding:'16px 20px', boxShadow:'0 1px 3px rgba(0,0,0,0.08)', borderLeft:`4px solid ${c}` }}>
-                <div style={{ fontSize:12, color:'#64748b', fontWeight:600, marginBottom:6 }}>{l}</div>
-                <div style={{ fontSize:24, fontWeight:800, color:'#0f172a' }}>{v}</div>
-              </div>
-            ))}
-          </div>
-
-          <div style={{ background:'#fff', borderRadius:12, padding:24, boxShadow:'0 1px 3px rgba(0,0,0,0.08)', marginBottom:24 }}>
-            <h3 style={{ fontWeight:700, marginBottom:20, color:'#0f172a' }}>Revenue & Bookings Trend</h3>
-            <ResponsiveContainer width="100%" height={260}>
-              <LineChart data={data.revenueByDay}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                <XAxis dataKey="date" tick={{fontSize:11}} />
-                <YAxis yAxisId="left" tick={{fontSize:11}} />
-                <YAxis yAxisId="right" orientation="right" tick={{fontSize:11}} />
-                <Tooltip formatter={(v,n)=>n==='Revenue'||n==='Commission'?`Rs.${v}`:v} />
-                <Legend />
-                <Line yAxisId="right" type="monotone" dataKey="bookings" stroke="#6366f1" strokeWidth={2} dot={false} name="Bookings" />
-                <Line yAxisId="left" type="monotone" dataKey="revenue" stroke="#10b981" strokeWidth={2} dot={false} name="Revenue" />
-                <Line yAxisId="left" type="monotone" dataKey="commission" stroke="#f59e0b" strokeWidth={2} dot={false} name="Commission" />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-
-          <div style={{ display:'flex', gap:8, marginBottom:16 }}>
-            {REPORTS.map(r=>(
-              <button key={r} onClick={()=>setReportType(r)} style={{ padding:'10px 18px', borderRadius:8, border:'none', cursor:'pointer', fontSize:13, fontWeight:600, background:reportType===r?'#6366f1':'#fff', color:reportType===r?'#fff':'#64748b', boxShadow:'0 1px 3px rgba(0,0,0,0.08)', textTransform:'capitalize' }}>{r}</button>
-            ))}
-          </div>
-
-          <div style={{ background:'#fff', borderRadius:12, boxShadow:'0 1px 3px rgba(0,0,0,0.08)', overflow:'hidden' }}>
-            {reportType==='revenue' && (
-              <table><thead><tr>{['Date','Bookings','Revenue','Commission'].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
-              <tbody>{data.revenueByDay.map((r,i)=><tr key={i} onMouseEnter={e=>e.currentTarget.style.background='#f8fafc'} onMouseLeave={e=>e.currentTarget.style.background='#fff'}><td style={td}>{r.date}</td><td style={td}>{r.bookings}</td><td style={td}><b>{INR(r.revenue)}</b></td><td style={td}>{INR(r.commission)}</td></tr>)}</tbody></table>
-            )}
-            {reportType==='workers' && (
-              <table><thead><tr>{['Name','City','Skill','Total Jobs','Rating','KYC'].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
-              <tbody>{data.workerPerf.map((r,i)=><tr key={i} onMouseEnter={e=>e.currentTarget.style.background='#f8fafc'} onMouseLeave={e=>e.currentTarget.style.background='#fff'}><td style={td}><b>{r.name}</b></td><td style={td}>{r.city}</td><td style={td}>{r.skill}</td><td style={td}><b>{r.jobs}</b></td><td style={td}>{r.rating} ★</td><td style={td}><span style={{ fontSize:12, padding:'2px 8px', borderRadius:20, background:r.kyc==='approved'?'#d1fae5':'#fef3c7', color:r.kyc==='approved'?'#065f46':'#92400e', fontWeight:700 }}>{r.kyc}</span></td></tr>)}</tbody></table>
-            )}
-            {reportType==='cities' && (
-              <table><thead><tr>{['City','Total Bookings','Completed','Revenue'].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
-              <tbody>{data.cityPerf.map((r,i)=><tr key={i} onMouseEnter={e=>e.currentTarget.style.background='#f8fafc'} onMouseLeave={e=>e.currentTarget.style.background='#fff'}><td style={td}><b>{r.city}</b></td><td style={td}>{r.bookings}</td><td style={td}>{r.completed}</td><td style={td}><b>{INR(r.revenue)}</b></td></tr>)}</tbody></table>
-            )}
-            {reportType==='services' && (
-              <table><thead><tr>{['Service','Total Bookings','Revenue'].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
-              <tbody>{data.serviceBreakdown.map((r,i)=><tr key={i} onMouseEnter={e=>e.currentTarget.style.background='#f8fafc'} onMouseLeave={e=>e.currentTarget.style.background='#fff'}><td style={td}><b>{r.service}</b></td><td style={td}>{r.count}</td><td style={td}><b>{INR(r.revenue)}</b></td></tr>)}</tbody></table>
-            )}
-            {reportType==='commission' && (
-              <table><thead><tr>{['Worker','Payout Amount','Commission','Status','Date'].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
-              <tbody>{data.commissionReport.map((r,i)=><tr key={i} onMouseEnter={e=>e.currentTarget.style.background='#f8fafc'} onMouseLeave={e=>e.currentTarget.style.background='#fff'}><td style={td}><b>{r.worker}</b></td><td style={td}>{INR(r.amount)}</td><td style={td}><b>{INR(r.commission)}</b></td><td style={td}><span style={{ fontSize:12, padding:'2px 8px', borderRadius:20, background:r.status==='paid'?'#d1fae5':'#fef3c7', color:r.status==='paid'?'#065f46':'#92400e', fontWeight:700 }}>{r.status}</span></td><td style={td}>{r.date}</td></tr>)}</tbody></table>
-            )}
-            {(data[reportType==='revenue'?'revenueByDay':reportType==='workers'?'workerPerf':reportType==='cities'?'cityPerf':reportType==='services'?'serviceBreakdown':'commissionReport']||[]).length===0 && (
-              <div style={{ padding:40, textAlign:'center', color:'#94a3b8' }}>No data for this period</div>
-            )}
-          </div>
-        </>)}
+        <div style={{ display:'flex', gap:6 }}>
+          {[7,30,90].map(d=>(
+            <button key={d} onClick={()=>setRange(d)}
+              style={{ background:range===d?C.primary:C.bg, color:range===d?'#fff':C.muted, border:'1px solid '+C.border, borderRadius:8, padding:'7px 14px', fontSize:12, fontWeight:600, cursor:'pointer', fontFamily:'inherit' }}>
+              {d}d
+            </button>
+          ))}
+        </div>
       </div>
+
+      {/* KPI cards */}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(180px,1fr))', gap:12, marginBottom:20 }}>
+        {[
+          ['Revenue',      INR(kpis.revenue),        '💰','#D1FAE5','#065F46'],
+          ['Commission',   INR(kpis.commission),      '🏦','#EEF2FF','#4338CA'],
+          ['Avg. Ticket',  INR(kpis.avgTicket),       '🎯','#FEF3C7','#92400E'],
+          ['Completion',   kpis.completionR+'%',      '✅','#D1FAE5','#065F46'],
+          ['Bookings',     kpis.totalBookings,        '📋','#DBEAFE','#1D4ED8'],
+          ['Completed',    kpis.completed,            '🎉','#D1FAE5','#065F46'],
+          ['Pending Pay',  kpis.pendingPay,           '⏳','#FEF3C7','#92400E'],
+          ['New Workers',  kpis.newWorkers,           '👷','#EDE9FE','#5B21B6'],
+          ['New Customers',kpis.newCustomers,         '👥','#DBEAFE','#1D4ED8'],
+        ].map(([l,v,ico,bg,col])=>(
+          <div key={l} style={{ background:C.card, borderRadius:14, padding:'14px 16px', border:'1px solid '+C.border, display:'flex', alignItems:'center', gap:12 }}>
+            <div style={{ width:38, height:38, borderRadius:10, background:bg, display:'flex', alignItems:'center', justifyContent:'center', fontSize:18, flexShrink:0 }}>{ico}</div>
+            <div>
+              <p style={{ fontSize:10, color:C.muted, fontWeight:700, textTransform:'uppercase', marginBottom:2 }}>{l}</p>
+              <p style={{ fontWeight:800, fontSize:18, color:col }}>{v}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Trend chart */}
+      <div style={{ background:C.card, borderRadius:16, padding:'20px 24px', marginBottom:16, border:'1px solid '+C.border }}>
+        <h3 style={{ fontWeight:700, fontSize:15, marginBottom:16 }}>Daily Trend — Bookings & Revenue</h3>
+        <ResponsiveContainer width="100%" height={220}>
+          <LineChart data={dailyTrend}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
+            <XAxis dataKey="date" tick={{fontSize:10}} />
+            <YAxis yAxisId="left" tick={{fontSize:10}} />
+            <YAxis yAxisId="right" orientation="right" tick={{fontSize:10}} />
+            <Tooltip />
+            <Legend />
+            <Line yAxisId="left"  type="monotone" dataKey="bookings" stroke={C.primary} strokeWidth={2} dot={false} name="Bookings" />
+            <Line yAxisId="right" type="monotone" dataKey="revenue"  stroke={C.success} strokeWidth={2} dot={false} name="Revenue (₹)" />
+            <Line yAxisId="left"  type="monotone" dataKey="newUsers" stroke={C.warning} strokeWidth={2} dot={false} name="New Users" />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16, marginBottom:16 }}>
+        <div style={{ background:C.card, borderRadius:16, padding:'20px 24px', border:'1px solid '+C.border }}>
+          <h3 style={{ fontWeight:700, fontSize:15, marginBottom:16 }}>Bookings by City</h3>
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart data={cityData} layout="vertical">
+              <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
+              <XAxis type="number" tick={{fontSize:10}} />
+              <YAxis type="category" dataKey="city" tick={{fontSize:11}} width={80} />
+              <Tooltip />
+              <Bar dataKey="count" fill={C.primary} radius={[0,6,6,0]} name="Bookings" />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+        <div style={{ background:C.card, borderRadius:16, padding:'20px 24px', border:'1px solid '+C.border }}>
+          <h3 style={{ fontWeight:700, fontSize:15, marginBottom:16 }}>Booking Status Distribution</h3>
+          <ResponsiveContainer width="100%" height={200}>
+            <PieChart>
+              <Pie data={statusData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={75} label={({name,percent})=>`${name} ${(percent*100).toFixed(0)}%`} labelLine={false}>
+                {statusData.map((_,i)=><Cell key={i} fill={COLORS[i%COLORS.length]} />)}
+              </Pie>
+              <Tooltip />
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      {serviceData.length > 0 && (
+        <div style={{ background:C.card, borderRadius:16, padding:'20px 24px', border:'1px solid '+C.border }}>
+          <h3 style={{ fontWeight:700, fontSize:15, marginBottom:16 }}>Top Services</h3>
+          <ResponsiveContainer width="100%" height={180}>
+            <BarChart data={serviceData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
+              <XAxis dataKey="name" tick={{fontSize:11}} />
+              <YAxis tick={{fontSize:11}} />
+              <Tooltip />
+              <Bar dataKey="value" fill={C.warning} radius={[6,6,0,0]} name="Bookings" />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
     </div>
   )
 }

@@ -1,176 +1,156 @@
 import { useState, useEffect } from 'react'
 import { sb } from '../lib/supabase'
-import TopBar from '../components/TopBar'
-import Badge from '../components/Badge'
-import Modal from '../components/Modal'
-import Loader from '../components/Loader'
 
-const fmt = d => d ? new Date(d).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '-'
-function btnS(bg,size='md') { return { background:bg,color:'#fff',border:'none',borderRadius:size==='sm'?6:8,padding:size==='sm'?'5px 10px':'9px 16px',fontSize:size==='sm'?12:13,fontWeight:600,cursor:'pointer',whiteSpace:'nowrap' } }
+const C = { primary:'#6366F1', success:'#10B981', danger:'#EF4444', warning:'#F59E0B', border:'#E2E8F0', card:'#FFFFFF', muted:'#64748B', text:'#0F172A', bg:'#F0F4FF' }
+const fmt = d => d ? new Date(d).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}) : '—'
 
-export default function Support() {
-  const [tickets, setTickets] = useState([])
-  const [disputes, setDisputes] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [tab, setTab] = useState('tickets')
-  const [filter, setFilter] = useState('all')
+function PriBadge({ p }) {
+  const m = { high:['#FEE2E2','#991B1B','🔴 High'], medium:['#FEF3C7','#92400E','🟡 Medium'], low:['#D1FAE5','#065F46','🟢 Low'] }
+  const [bg,col,lbl] = m[p||'medium'] || m.medium
+  return <span style={{ background:bg, color:col, fontSize:11, fontWeight:700, padding:'3px 9px', borderRadius:20 }}>{lbl}</span>
+}
+
+function StatusBadge({ s }) {
+  const m = { open:['#DBEAFE','#1D4ED8','Open'], in_progress:['#FEF3C7','#92400E','In Progress'], resolved:['#D1FAE5','#065F46','Resolved'], closed:['#F1F5F9','#475569','Closed'] }
+  const [bg,col,lbl] = m[s||'open'] || m.open
+  return <span style={{ background:bg, color:col, fontSize:11, fontWeight:700, padding:'3px 9px', borderRadius:20 }}>{lbl}</span>
+}
+
+export default function Support({ user, showToast }) {
+  const [tickets,  setTickets]  = useState([])
+  const [loading,  setLoading]  = useState(true)
+  const [filter,   setFilter]   = useState('open')
   const [selected, setSelected] = useState(null)
-  const [reply, setReply] = useState('')
-  const [saving, setSaving] = useState(false)
+  const [reply,    setReply]    = useState('')
+  const [saving,   setSaving]   = useState(false)
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load() }, [filter])
 
   async function load() {
     setLoading(true)
-    const [t, d] = await Promise.all([
-      sb.from('support_tickets').select('*').order('created_at',{ascending:false}),
-      sb.from('disputes').select('*, bookings(service,customer_name,amount)').order('created_at',{ascending:false}),
-    ])
-    setTickets(t.data||[])
-    setDisputes(d.data||[])
+    let q = sb.from('support_tickets').select('*').order('created_at', { ascending: false })
+    if (filter !== 'all') q = q.eq('status', filter)
+    const { data } = await q
+    setTickets(data || [])
     setLoading(false)
   }
 
-  async function updateTicket(id, status, adminReply) {
+  async function updateStatus(id, status) {
     setSaving(true)
-    await sb.from('support_tickets').update({ status, admin_reply: adminReply||null, replied_at: adminReply?new Date().toISOString():null }).eq('id',id)
+    await sb.from('support_tickets').update({ status, resolved_at: status==='resolved'?new Date().toISOString():null }).eq('id', id)
+    await sb.from('admin_logs').insert({ admin_id: user.id, action:'update_ticket', target_id: id, details:{ status } }).then(()=>{})
     await load()
     setSaving(false)
-    setSelected(null)
+    setSelected(s => s ? { ...s, status } : null)
+    showToast('Ticket ' + status, 'success')
   }
 
-  async function updateDispute(id, status, resolution) {
+  async function sendReply() {
+    if (!reply.trim() || !selected) return
     setSaving(true)
-    await sb.from('disputes').update({ status, resolution: resolution||null, resolved_at: ['resolved','closed'].includes(status)?new Date().toISOString():null }).eq('id',id)
-    await load()
+    await sb.from('support_replies').insert({ ticket_id: selected.id, admin_id: user.id, message: reply.trim(), is_admin: true })
+    if (selected.user_id) {
+      await sb.from('notifications').insert({ user_id: selected.user_id, title:'📩 Support Reply', body: reply.trim().slice(0,100) })
+    }
+    setReply('')
     setSaving(false)
-    setSelected(null)
+    showToast('Reply sent', 'success')
   }
 
-  const filteredTickets = tickets.filter(t=>filter==='all'||t.status===filter)
-  const filteredDisputes = disputes.filter(d=>filter==='all'||d.status===filter)
-  const openCount = tickets.filter(t=>t.status==='open').length + disputes.filter(d=>d.status==='open').length
+  const th = { padding:'10px 14px', textAlign:'left', fontSize:11, fontWeight:700, color:C.muted, textTransform:'uppercase', letterSpacing:.5, background:C.bg, borderBottom:'1px solid '+C.border }
+  const td = { padding:'11px 14px', fontSize:13, color:C.text, borderBottom:'1px solid '+C.border }
 
-  const th = { padding:'10px 16px',textAlign:'left',fontSize:12,fontWeight:700,color:'#64748b',textTransform:'uppercase',letterSpacing:'0.5px',background:'#f8fafc',borderBottom:'1px solid #e2e8f0' }
-  const td = { padding:'12px 16px',fontSize:14,color:'#1e293b',borderBottom:'1px solid #f1f5f9' }
+  const FILTERS = ['open','in_progress','resolved','closed','all']
 
   return (
     <div>
-      <TopBar title="Support Management" subtitle={`${openCount} open items requiring attention`} />
-      <div style={{ padding:32 }}>
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12, marginBottom:24 }}>
-          {[['Open Tickets',tickets.filter(t=>t.status==='open').length,'#ef4444'],['In Progress',tickets.filter(t=>t.status==='in_progress').length,'#f59e0b'],['Resolved',tickets.filter(t=>t.status==='resolved').length,'#10b981'],['Open Disputes',disputes.filter(d=>d.status==='open').length,'#8b5cf6']].map(([l,v,c])=>(
-            <div key={l} style={{ background:'#fff', borderRadius:10, padding:'14px 18px', boxShadow:'0 1px 3px rgba(0,0,0,0.08)', borderLeft:`4px solid ${c}` }}>
-              <div style={{ fontSize:12, color:'#64748b', fontWeight:600, marginBottom:4 }}>{l}</div>
-              <div style={{ fontSize:26, fontWeight:800, color:'#0f172a' }}>{v}</div>
-            </div>
-          ))}
+      <div style={{ background:C.card, borderRadius:16, padding:'18px 24px', marginBottom:16, border:'1px solid '+C.border, display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+        <div>
+          <h2 style={{ fontSize:18, fontWeight:800, marginBottom:2 }}>Support Tickets</h2>
+          <p style={{ fontSize:13, color:C.muted }}>{tickets.length} tickets in view</p>
         </div>
-        <div style={{ display:'flex', gap:8, marginBottom:16 }}>
-          {['tickets','disputes'].map(t=>(
-            <button key={t} onClick={()=>setTab(t)} style={{ padding:'10px 20px', borderRadius:8, border:'none', cursor:'pointer', fontSize:14, fontWeight:600, background:tab===t?'#6366f1':'#fff', color:tab===t?'#fff':'#64748b', boxShadow:'0 1px 3px rgba(0,0,0,0.08)', textTransform:'capitalize' }}>{t} ({t==='tickets'?tickets.length:disputes.length})</button>
-          ))}
-          <div style={{ marginLeft:'auto', display:'flex', gap:6 }}>
-            {['all','open','in_progress','resolved','closed'].map(f=>(
-              <button key={f} onClick={()=>setFilter(f)} style={{ padding:'7px 10px', borderRadius:7, border:'none', cursor:'pointer', fontSize:12, fontWeight:600, background:filter===f?'#0f172a':'#f1f5f9', color:filter===f?'#fff':'#64748b', textTransform:'capitalize' }}>{f.replace('_',' ')}</button>
-            ))}
-          </div>
-        </div>
-        <div style={{ background:'#fff', borderRadius:12, boxShadow:'0 1px 3px rgba(0,0,0,0.08)', overflow:'hidden' }}>
-          {loading ? <Loader /> : tab==='tickets' ? (
-            <div style={{ overflowX:'auto' }}>
-              <table>
-                <thead><tr>{['Category','Subject','User','Priority','Status','Date','Actions'].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
-                <tbody>
-                  {filteredTickets.map(t=>(
-                    <tr key={t.id} onMouseEnter={e=>e.currentTarget.style.background='#f8fafc'} onMouseLeave={e=>e.currentTarget.style.background='#fff'}>
-                      <td style={td}><span style={{ fontSize:12, background:'#f1f5f9', padding:'3px 8px', borderRadius:6 }}>{t.category||'General'}</span></td>
-                      <td style={td}><div style={{ fontWeight:600, maxWidth:200 }}>{t.subject||'-'}</div></td>
-                      <td style={td}><div style={{ fontSize:12, color:'#64748b' }}>{t.user_email||'-'}</div></td>
-                      <td style={td}><Badge status={t.priority||'medium'} /></td>
-                      <td style={td}><Badge status={t.status||'open'} /></td>
-                      <td style={td} style={{ ...td, fontSize:12 }}>{fmt(t.created_at)}</td>
-                      <td style={td}>
-                        <div style={{ display:'flex', gap:4 }}>
-                          <button onClick={()=>{ setSelected({...t,_type:'ticket'}); setReply(t.admin_reply||'') }} style={btnS('#6366f1','sm')}>Reply</button>
-                          {t.status==='open' && <button onClick={()=>updateTicket(t.id,'in_progress',null)} style={btnS('#f59e0b','sm')}>Assign</button>}
-                          {t.status!=='resolved' && <button onClick={()=>updateTicket(t.id,'resolved',t.admin_reply)} style={btnS('#10b981','sm')}>Resolve</button>}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                  {!filteredTickets.length && <tr><td colSpan={7} style={{ padding:40, textAlign:'center', color:'#94a3b8' }}>No tickets found</td></tr>}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <div style={{ overflowX:'auto' }}>
-              <table>
-                <thead><tr>{['Booking','Raised By','Reason','Status','Date','Actions'].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
-                <tbody>
-                  {filteredDisputes.map(d=>(
-                    <tr key={d.id} onMouseEnter={e=>e.currentTarget.style.background='#f8fafc'} onMouseLeave={e=>e.currentTarget.style.background='#fff'}>
-                      <td style={td}><div style={{ fontWeight:600 }}>{d.bookings?.service||'-'}</div><div style={{ fontSize:11, color:'#94a3b8' }}>{d.bookings?.customer_name||'-'}</div></td>
-                      <td style={td}><Badge status={d.raised_by_role||'customer'} /></td>
-                      <td style={td}><div style={{ maxWidth:200, fontSize:13 }}>{d.reason||'-'}</div></td>
-                      <td style={td}><Badge status={d.status||'open'} /></td>
-                      <td style={td} style={{ ...td, fontSize:12 }}>{fmt(d.created_at)}</td>
-                      <td style={td}>
-                        <div style={{ display:'flex', gap:4 }}>
-                          <button onClick={()=>setSelected({...d,_type:'dispute'})} style={btnS('#6366f1','sm')}>View</button>
-                          {d.status==='open' && <>
-                            <button onClick={()=>updateDispute(d.id,'resolved','Resolved by admin')} style={btnS('#10b981','sm')}>Resolve</button>
-                            <button onClick={()=>updateDispute(d.id,'closed','Escalated')} style={btnS('#ef4444','sm')}>Escalate</button>
-                          </>}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                  {!filteredDisputes.length && <tr><td colSpan={6} style={{ padding:40, textAlign:'center', color:'#94a3b8' }}>No disputes found</td></tr>}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
+        <button onClick={load} style={{ background:C.bg, border:'1px solid '+C.border, borderRadius:10, padding:'8px 16px', fontWeight:600, fontSize:13, cursor:'pointer', fontFamily:'inherit' }}>↺ Refresh</button>
       </div>
-      {selected?._type==='ticket' && (
-        <Modal title={`Ticket: ${selected.subject||'No subject'}`} onClose={()=>setSelected(null)} width={620}>
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:16 }}>
-            {[['Category',selected.category],['Priority',<Badge status={selected.priority||'medium'} />],['Status',<Badge status={selected.status||'open'} />],['User',selected.user_email]].map(([l,v])=>(
-              <div key={l} style={{ background:'#f8fafc', borderRadius:8, padding:'10px 14px' }}><div style={{ fontSize:11, color:'#64748b', fontWeight:600, marginBottom:3 }}>{l}</div><div style={{ fontWeight:600, fontSize:13 }}>{v||'-'}</div></div>
-            ))}
+
+      <div style={{ background:C.card, borderRadius:16, border:'1px solid '+C.border, overflow:'hidden' }}>
+        <div style={{ padding:'14px 18px', borderBottom:'1px solid '+C.border, display:'flex', gap:8 }}>
+          {FILTERS.map(f=>(
+            <button key={f} onClick={()=>setFilter(f)}
+              style={{ padding:'7px 13px', borderRadius:8, border:'none', cursor:'pointer', fontSize:12, fontWeight:600, fontFamily:'inherit', textTransform:'capitalize',
+                background:filter===f?C.primary:C.bg, color:filter===f?'#fff':C.muted }}>{f.replace('_',' ')}</button>
+          ))}
+        </div>
+
+        {loading ? (
+          <div style={{ padding:48, textAlign:'center', color:C.muted }}>Loading...</div>
+        ) : (
+          <div style={{ overflowX:'auto' }}>
+            <table style={{ width:'100%', borderCollapse:'collapse' }}>
+              <thead><tr>{['Ticket','User','Subject','Category','Priority','Status','Date','Action'].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
+              <tbody>
+                {tickets.map(t=>(
+                  <tr key={t.id}>
+                    <td style={td}><p style={{ fontFamily:'monospace', fontSize:12, fontWeight:600 }}>{t.id.slice(0,8).toUpperCase()}</p></td>
+                    <td style={td}><p style={{ fontWeight:600 }}>{t.user_name||'—'}</p><p style={{ fontSize:11, color:C.muted }}>{t.user_phone||t.user_email||'—'}</p></td>
+                    <td style={td}><p style={{ fontWeight:600 }}>{t.subject||t.message?.slice(0,40)||'—'}</p></td>
+                    <td style={td}>{t.category||'general'}</td>
+                    <td style={td}><PriBadge p={t.priority} /></td>
+                    <td style={td}><StatusBadge s={t.status} /></td>
+                    <td style={td}><p style={{ fontSize:12 }}>{fmt(t.created_at)}</p></td>
+                    <td style={td}>
+                      <div style={{ display:'flex', gap:5 }}>
+                        <button onClick={()=>setSelected(t)} style={{ background:C.primary, color:'#fff', border:'none', borderRadius:7, padding:'5px 10px', fontSize:12, fontWeight:600, cursor:'pointer', fontFamily:'inherit' }}>View</button>
+                        {t.status==='open' && <button onClick={()=>updateStatus(t.id,'in_progress')} style={{ background:C.warning, color:'#fff', border:'none', borderRadius:7, padding:'5px 10px', fontSize:12, fontWeight:600, cursor:'pointer', fontFamily:'inherit' }}>Start</button>}
+                        {t.status!=='resolved' && t.status!=='closed' && <button onClick={()=>updateStatus(t.id,'resolved')} style={{ background:C.success, color:'#fff', border:'none', borderRadius:7, padding:'5px 10px', fontSize:12, fontWeight:600, cursor:'pointer', fontFamily:'inherit' }}>Resolve</button>}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {!tickets.length && <div style={{ padding:48, textAlign:'center', color:C.muted }}>No tickets in this view</div>}
           </div>
-          <div style={{ background:'#f8fafc', borderRadius:8, padding:'12px 16px', marginBottom:16 }}>
-            <div style={{ fontSize:11, color:'#64748b', fontWeight:600, marginBottom:6 }}>Message</div>
-            <div style={{ fontSize:14 }}>{selected.body||'-'}</div>
+        )}
+      </div>
+
+      {selected && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.5)', zIndex:1000, display:'flex', alignItems:'flex-start', justifyContent:'center', padding:20, overflowY:'auto' }}>
+          <div style={{ background:'#fff', borderRadius:20, width:'100%', maxWidth:560, margin:'20px auto' }}>
+            <div style={{ padding:'20px 24px', borderBottom:'1px solid '+C.border, display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+              <div>
+                <h3 style={{ fontWeight:800, fontSize:18 }}>Ticket #{selected.id.slice(0,8).toUpperCase()}</h3>
+                <p style={{ fontSize:13, color:C.muted }}>{selected.user_name||'—'} · {fmt(selected.created_at)}</p>
+              </div>
+              <button onClick={()=>setSelected(null)} style={{ background:C.bg, border:'none', borderRadius:10, width:36, height:36, fontSize:18, cursor:'pointer' }}>✕</button>
+            </div>
+            <div style={{ padding:24 }}>
+              <div style={{ display:'flex', gap:8, marginBottom:16 }}>
+                <StatusBadge s={selected.status} />
+                <PriBadge p={selected.priority} />
+              </div>
+              {selected.subject && <p style={{ fontWeight:700, fontSize:16, marginBottom:8 }}>{selected.subject}</p>}
+              <div style={{ background:C.bg, borderRadius:12, padding:'14px 16px', marginBottom:20, border:'1px solid '+C.border }}>
+                <p style={{ fontSize:14, lineHeight:1.6 }}>{selected.message||'No message'}</p>
+              </div>
+
+              {/* Status actions */}
+              <div style={{ display:'flex', gap:8, marginBottom:20 }}>
+                {selected.status==='open' && <button onClick={()=>updateStatus(selected.id,'in_progress')} disabled={saving} style={{ background:C.warning, color:'#fff', border:'none', borderRadius:10, padding:'9px 18px', fontWeight:700, fontSize:13, cursor:'pointer', fontFamily:'inherit' }}>▶ Start Working</button>}
+                {selected.status!=='resolved'&&selected.status!=='closed' && <button onClick={()=>updateStatus(selected.id,'resolved')} disabled={saving} style={{ background:C.success, color:'#fff', border:'none', borderRadius:10, padding:'9px 18px', fontWeight:700, fontSize:13, cursor:'pointer', fontFamily:'inherit' }}>✅ Mark Resolved</button>}
+                {selected.status!=='closed' && <button onClick={()=>updateStatus(selected.id,'closed')} disabled={saving} style={{ background:C.muted, color:'#fff', border:'none', borderRadius:10, padding:'9px 18px', fontWeight:700, fontSize:13, cursor:'pointer', fontFamily:'inherit' }}>Close</button>}
+              </div>
+
+              {/* Reply */}
+              <p style={{ fontWeight:700, fontSize:14, marginBottom:8 }}>Send Reply to User</p>
+              <textarea value={reply} onChange={e=>setReply(e.target.value)} placeholder="Type your reply here..." rows={3}
+                style={{ width:'100%', border:'1.5px solid '+C.border, borderRadius:12, padding:'12px 14px', fontSize:14, outline:'none', fontFamily:'inherit', resize:'none', boxSizing:'border-box', marginBottom:10 }} />
+              <button onClick={sendReply} disabled={saving || !reply.trim()}
+                style={{ background:C.primary, color:'#fff', border:'none', borderRadius:10, padding:'10px 20px', fontWeight:700, fontSize:13, cursor:'pointer', fontFamily:'inherit', opacity:!reply.trim()||saving?0.6:1 }}>
+                {saving ? 'Sending...' : '📨 Send Reply'}
+              </button>
+            </div>
           </div>
-          <textarea value={reply} onChange={e=>setReply(e.target.value)} placeholder="Type your reply..." rows={4} style={{ width:'100%', padding:'10px 14px', border:'1px solid #e2e8f0', borderRadius:8, fontSize:14, outline:'none', resize:'vertical', marginBottom:12 }} />
-          <div style={{ display:'flex', gap:8 }}>
-            <button disabled={saving} onClick={()=>updateTicket(selected.id,'in_progress',reply)} style={btnS('#6366f1')}>Send Reply</button>
-            <button disabled={saving} onClick={()=>updateTicket(selected.id,'resolved',reply)} style={btnS('#10b981')}>Reply and Resolve</button>
-            <button disabled={saving} onClick={()=>updateTicket(selected.id,'closed',reply)} style={btnS('#64748b')}>Close Ticket</button>
-          </div>
-        </Modal>
-      )}
-      {selected?._type==='dispute' && (
-        <Modal title="Dispute Details" onClose={()=>setSelected(null)} width={580}>
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:16 }}>
-            {[['Service',selected.bookings?.service],['Customer',selected.bookings?.customer_name],['Amount',`Rs.${selected.bookings?.amount||0}`],['Raised By',selected.raised_by_role],['Status',<Badge status={selected.status||'open'} />],['Date',fmt(selected.created_at)]].map(([l,v])=>(
-              <div key={l} style={{ background:'#f8fafc', borderRadius:8, padding:'10px 14px' }}><div style={{ fontSize:11, color:'#64748b', fontWeight:600, marginBottom:3 }}>{l}</div><div style={{ fontWeight:600, fontSize:13 }}>{v||'-'}</div></div>
-            ))}
-          </div>
-          <div style={{ background:'#fff3cd', borderRadius:8, padding:'12px 16px', marginBottom:16 }}>
-            <div style={{ fontSize:11, color:'#92400e', fontWeight:600, marginBottom:4 }}>Reason</div>
-            <div style={{ fontSize:14 }}>{selected.reason||'-'}</div>
-          </div>
-          <textarea placeholder="Enter resolution notes..." rows={3} style={{ width:'100%', padding:'10px 14px', border:'1px solid #e2e8f0', borderRadius:8, fontSize:14, outline:'none', resize:'vertical', marginBottom:12 }} id="dispute-res" />
-          <div style={{ display:'flex', gap:8 }}>
-            {selected.status==='open' && <>
-              <button disabled={saving} onClick={()=>updateDispute(selected.id,'resolved',document.getElementById('dispute-res')?.value)} style={btnS('#10b981')}>Mark Resolved</button>
-              <button disabled={saving} onClick={()=>updateDispute(selected.id,'closed','Escalated to senior team')} style={btnS('#ef4444')}>Escalate</button>
-            </>}
-          </div>
-        </Modal>
+        </div>
       )}
     </div>
   )
