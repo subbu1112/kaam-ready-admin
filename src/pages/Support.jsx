@@ -89,7 +89,7 @@ export default function Support() {
                       <td style={td}><div style={{ fontSize:12, color:'#64748b' }}>{t.user_email||'-'}</div></td>
                       <td style={td}><Badge status={t.priority||'medium'} /></td>
                       <td style={td}><Badge status={t.status||'open'} /></td>
-                      <td style={{ ...td, fontSize:12 }}>{fmt(t.created_at)}</td>
+                      <td style={td} style={{ ...td, fontSize:12 }}>{fmt(t.created_at)}</td>
                       <td style={td}>
                         <div style={{ display:'flex', gap:4 }}>
                           <button onClick={()=>{ setSelected({...t,_type:'ticket'}); setReply(t.admin_reply||'') }} style={btnS('#6366f1','sm')}>Reply</button>
@@ -114,7 +114,7 @@ export default function Support() {
                       <td style={td}><Badge status={d.raised_by_role||'customer'} /></td>
                       <td style={td}><div style={{ maxWidth:200, fontSize:13 }}>{d.reason||'-'}</div></td>
                       <td style={td}><Badge status={d.status||'open'} /></td>
-                      <td style={{ ...td, fontSize:12 }}>{fmt(d.created_at)}</td>
+                      <td style={td} style={{ ...td, fontSize:12 }}>{fmt(d.created_at)}</td>
                       <td style={td}>
                         <div style={{ display:'flex', gap:4 }}>
                           <button onClick={()=>setSelected({...d,_type:'dispute'})} style={btnS('#6366f1','sm')}>View</button>

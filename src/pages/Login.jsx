@@ -1,10 +1,13 @@
 import { useState } from 'react'
 import { sb } from '../lib/supabase'
 
+const SUPABASE_URL  = import.meta.env.VITE_SUPABASE_URL
+const SUPABASE_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY
+
 export default function Login({ onLogin }) {
-  const [email, setEmail] = useState('')
-  const [pass,  setPass]  = useState('')
-  const [err,   setErr]   = useState('')
+  const [email,   setEmail]   = useState('')
+  const [pass,    setPass]    = useState('')
+  const [err,     setErr]     = useState('')
   const [loading, setLoading] = useState(false)
 
   async function handleSubmit(e) {
@@ -12,9 +15,38 @@ export default function Login({ onLogin }) {
     setErr(''); setLoading(true)
     const ADMIN = import.meta.env.VITE_ADMIN_EMAIL || 'admin@kaamready.in'
     if (email.toLowerCase().trim() !== ADMIN) { setErr('Not an admin account'); setLoading(false); return }
-    const { error } = await sb.auth.signInWithPassword({ email: email.trim(), password: pass })
-    if (error) setErr(error.message)
-    else onLogin()
+
+    // Step 1: sign in with Supabase
+    const { data: authData, error: authErr } = await sb.auth.signInWithPassword({ email: email.trim(), password: pass })
+    if (authErr) { setErr(authErr.message); setLoading(false); return }
+
+    // Step 2: server-side RBAC check via Edge Function
+    try {
+      const token = authData.session?.access_token
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/admin-verify`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': SUPABASE_ANON,
+          'Authorization': `Bearer ${token}`,
+        },
+      })
+      if (!res.ok) {
+        // Not an admin — revoke session immediately
+        await sb.auth.signOut()
+        const data = await res.json().catch(() => ({}))
+        setErr(data.error || 'Admin verification failed. Access denied.')
+        setLoading(false)
+        return
+      }
+    } catch {
+      await sb.auth.signOut()
+      setErr('Could not verify admin access. Please try again.')
+      setLoading(false)
+      return
+    }
+
+    onLogin()
     setLoading(false)
   }
 
@@ -44,7 +76,7 @@ export default function Login({ onLogin }) {
             width:'100%', padding:'13px', background:'#6366f1', color:'#fff', border:'none',
             borderRadius:10, fontWeight:700, fontSize:15, cursor:'pointer', opacity: loading ? 0.7 : 1
           }}>
-            {loading ? 'Signing in...' : 'Sign In to Admin Panel'}
+            {loading ? 'Verifying...' : 'Sign In to Admin Panel'}
           </button>
         </form>
       </div>

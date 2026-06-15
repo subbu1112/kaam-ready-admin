@@ -1,20 +1,20 @@
-import { useState, useEffect, lazy, Suspense } from 'react'
+import { useState, useEffect, useRef, lazy, Suspense } from 'react'
 import { sb } from './lib/supabase'
 import Login   from './pages/Login'
 import Sidebar from './components/Sidebar'
 
-const Dashboard    = lazy(() => import('./pages/Dashboard'))
-const Users        = lazy(() => import('./pages/Users'))
-const Workers      = lazy(() => import('./pages/Workers'))
-const Bookings     = lazy(() => import('./pages/Bookings'))
-const Payments     = lazy(() => import('./pages/Payments'))
-const Payouts      = lazy(() => import('./pages/Payouts'))
-const Support      = lazy(() => import('./pages/Support'))
-const ReportsInbox = lazy(() => import('./pages/ReportsInbox'))
-const Analytics    = lazy(() => import('./pages/Reports'))
-const Referrals    = lazy(() => import('./pages/Referrals'))
-const CMS          = lazy(() => import('./pages/CMS'))
-const Logs         = lazy(() => import('./pages/Logs'))
+// ── Lazy-loaded pages (code splitting) ───────────────────────────────────────
+const Dashboard = lazy(() => import('./pages/Dashboard'))
+const Users     = lazy(() => import('./pages/Users'))
+const Workers   = lazy(() => import('./pages/Workers'))
+const Bookings  = lazy(() => import('./pages/Bookings'))
+const Payments  = lazy(() => import('./pages/Payments'))
+const Payouts   = lazy(() => import('./pages/Payouts'))
+const Support   = lazy(() => import('./pages/Support'))
+const Reports   = lazy(() => import('./pages/Reports'))
+const Logs      = lazy(() => import('./pages/Logs'))
+
+const IDLE_TIMEOUT_MS = 30 * 60 * 1000 // 30 minutes
 
 function PageLoader() {
   return (
@@ -29,6 +29,26 @@ export default function App() {
   const [user,    setUser]    = useState(null)
   const [page,    setPage]    = useState('dashboard')
   const [checked, setChecked] = useState(false)
+  const idleTimer = useRef(null)
+
+  // 30-minute idle auto-logout
+  useEffect(() => {
+    if (!user) return
+    function resetIdle() {
+      clearTimeout(idleTimer.current)
+      idleTimer.current = setTimeout(async () => {
+        await sb.auth.signOut()
+        // setUser handled by onAuthStateChange
+      }, IDLE_TIMEOUT_MS)
+    }
+    const events = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart']
+    events.forEach(ev => window.addEventListener(ev, resetIdle))
+    resetIdle() // start timer immediately on login
+    return () => {
+      events.forEach(ev => window.removeEventListener(ev, resetIdle))
+      clearTimeout(idleTimer.current)
+    }
+  }, [user])
 
   useEffect(() => {
     sb.auth.getSession().then(({ data }) => {
@@ -48,31 +68,19 @@ export default function App() {
     </div>
   )
 
-  if (!user) return <Login onLogin={setUser} />
+  if (!user) return <Login onLogin={() => {}} />
 
-  const pages = {
-    dashboard:    <Dashboard />,
-    users:        <Users />,
-    workers:      <Workers />,
-    bookings:     <Bookings />,
-    payments:     <Payments />,
-    payouts:      <Payouts />,
-    support:      <Support />,
-    reportsinbox: <ReportsInbox />,
-    referrals:    <Referrals />,
-    cms:          <CMS />,
-    analytics:    <Analytics />,
-    logs:         <Logs />,
-  }
+  const pages = { dashboard:<Dashboard />, users:<Users />, workers:<Workers />, bookings:<Bookings />,
+    payments:<Payments />, payouts:<Payouts />, support:<Support />, reports:<Reports />, logs:<Logs /> }
 
   return (
-    <div style={{ display:'flex', height:'100vh', background:'#f1f5f9', overflow:'hidden' }}>
-      <Sidebar page={page} setPage={setPage} user={user} onLogout={() => sb.auth.signOut()} />
-      <main style={{ flex:1, overflowY:'auto' }}>
+    <div style={{ display:'flex', height:'100vh', overflow:'hidden', background:'#f1f5f9' }}>
+      <Sidebar page={page} setPage={setPage} user={user} onSignOut={() => sb.auth.signOut()} />
+      <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
         <Suspense fallback={<PageLoader />}>
           {pages[page] || <Dashboard />}
         </Suspense>
-      </main>
+      </div>
     </div>
   )
 }
