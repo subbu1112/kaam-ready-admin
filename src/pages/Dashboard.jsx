@@ -138,4 +138,36 @@ export default function Dashboard({ user, showToast, setPage }) {
               <Legend />
               <Line yAxisId="left"  type="monotone" dataKey="bookings" stroke={C.primary} strokeWidth={2} dot={false} name="Bookings" />
               <Line yAxisId="right" type="monotone" dataKey="revenue"  stroke={C.success} strokeWidth={2} dot={false} name="Revenue (₹)" />
-            </Lin
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+
+        <div style={{ background:C.card, borderRadius:16, padding:'20px 24px', border:'1px solid '+C.border }}>
+          <h3 style={{ fontWeight:700, fontSize:15, marginBottom:16 }}>Booking Status</h3>
+          <ResponsiveContainer width="100%" height={220}>
+            <PieChart>
+              <Pie data={statusDist} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={75} label={({name,percent})=>`${name} ${(percent*100).toFixed(0)}%`} labelLine={false}>
+                {statusDist.map((_,i)=><Cell key={i} fill={COLORS[i%COLORS.length]} />)}
+              </Pie>
+              <Tooltip />
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      {/* City bar chart */}
+      <div style={{ background:C.card, borderRadius:16, padding:'20px 24px', border:'1px solid '+C.border }}>
+        <h3 style={{ fontWeight:700, fontSize:15, marginBottom:16 }}>Bookings by City</h3>
+        <ResponsiveContainer width="100%" height={180}>
+          <BarChart data={cityData}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
+            <XAxis dataKey="city" tick={{fontSize:12}} />
+            <YAxis tick={{fontSize:12}} />
+            <Tooltip />
+            <Bar dataKey="count" fill={C.primary} radius={[6,6,0,0]} name="Bookings" />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  )
+}

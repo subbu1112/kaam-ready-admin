@@ -193,4 +193,122 @@ export default function Payouts() {
               <div key={n} style={{ display:'flex', alignItems:'center', flex:1 }}>
                 <div style={{ display:'flex', flexDirection:'column', alignItems:'center', flex:1 }}>
                   <div style={{ width:28, height:28, borderRadius:'50%', background:'#6366f1', color:'#fff', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:700, fontSize:13 }}>{n}</div>
-                  <div style={{ fontSize:11, color:'#64748b', marginT
+                  <div style={{ fontSize:11, color:'#64748b', marginTop:4, textAlign:'center' }}>{label}</div>
+                </div>
+                {i<2 && <div style={{ height:2, width:32, background:'#e2e8f0', margin:'0 4px', marginBottom:18 }} />}
+              </div>
+            ))}
+          </div>
+
+          {/* Worker info */}
+          <div style={{ background:'#f8fafc', borderRadius:10, padding:'14px 16px', marginBottom:16 }}>
+            <div style={{ fontSize:12, color:'#64748b', fontWeight:600, marginBottom:8 }}>WORKER DETAILS</div>
+            <div style={{ fontWeight:700, fontSize:16, color:'#0f172a', marginBottom:4 }}>{payNow.workers?.name||'—'}</div>
+            <div style={{ fontSize:13, color:'#64748b' }}>{payNow.workers?.phone||'—'}</div>
+          </div>
+
+          {/* UPI ID — big copy box */}
+          <div style={{ marginBottom:16 }}>
+            <div style={{ fontSize:12, color:'#64748b', fontWeight:700, marginBottom:6, textTransform:'uppercase' }}>Step 1 — UPI ID to pay</div>
+            <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+              <div style={{ flex:1, background:'#eff6ff', border:'2px solid #6366f1', borderRadius:8, padding:'12px 16px', fontFamily:'monospace', fontSize:16, fontWeight:700, color:'#1e293b', letterSpacing:'0.5px' }}>
+                {payNow.workers?.upi_id || 'No UPI ID on file'}
+              </div>
+              <button
+                onClick={()=>copyUPI(payNow.workers?.upi_id||'')}
+                style={{ padding:'12px 16px', borderRadius:8, border:'1px solid #e2e8f0', background:copied?'#10b981':'#fff', color:copied?'#fff':'#374151', cursor:'pointer', fontSize:13, fontWeight:600, whiteSpace:'nowrap' }}
+              >{copied?'✓ Copied':'Copy'}</button>
+            </div>
+            {payNow.workers?.bank_account && (
+              <div style={{ marginTop:8, fontSize:12, color:'#64748b' }}>
+                Bank: <b>{payNow.workers.bank_account}</b> | IFSC: <b>{payNow.workers.bank_ifsc||'—'}</b>
+              </div>
+            )}
+          </div>
+
+          {/* Amount */}
+          <div style={{ marginBottom:16 }}>
+            <div style={{ fontSize:12, color:'#64748b', fontWeight:700, marginBottom:6, textTransform:'uppercase' }}>Step 2 — Amount to transfer</div>
+            <div style={{ background:'#f0fdf4', border:'2px solid #10b981', borderRadius:8, padding:'14px 20px', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+              <div>
+                <div style={{ fontSize:28, fontWeight:800, color:'#065f46' }}>{INR(payNow.amount)}</div>
+                <div style={{ fontSize:12, color:'#6b7280', marginTop:2 }}>Worker receives this amount after 10% platform commission</div>
+              </div>
+              <div style={{ textAlign:'right' }}>
+                <div style={{ fontSize:12, color:'#94a3b8' }}>Commission deducted</div>
+                <div style={{ fontSize:14, fontWeight:700, color:'#ef4444' }}>— {INR(payNow.commission_amount||0)}</div>
+              </div>
+            </div>
+          </div>
+
+          {/* UTR */}
+          <div style={{ marginBottom:20 }}>
+            <div style={{ fontSize:12, color:'#64748b', fontWeight:700, marginBottom:6, textTransform:'uppercase' }}>Step 3 — Enter UTR / Transaction Reference</div>
+            <input
+              style={{ ...inp, marginBottom:0, fontFamily:'monospace', fontSize:15 }}
+              placeholder="e.g. 406123456789 or T2406141234ABC"
+              value={utrInput}
+              onChange={e=>setUtrInput(e.target.value)}
+            />
+            <div style={{ fontSize:11, color:'#94a3b8', marginTop:4 }}>You'll find this in your UPI app under transaction details after the transfer.</div>
+          </div>
+
+          <div style={{ display:'flex', gap:8 }}>
+            <button
+              disabled={saving || !utrInput.trim()}
+              onClick={confirmPayment}
+              style={{ ...btnS('#10b981'), flex:1, padding:'13px', fontSize:15, opacity:(!utrInput.trim()||saving)?0.5:1 }}
+            >{saving ? 'Saving...' : '✓ Confirm Payment Sent'}</button>
+            <button onClick={()=>{ setPayNow(null); setUtrInput('') }} style={{ ...btnS('#64748b'), padding:'13px 20px' }}>Cancel</button>
+          </div>
+        </Modal>
+      )}
+
+      {/* ── VIEW DETAIL MODAL ─────────────────────────────────── */}
+      {selected && (
+        <Modal title="Payout Details" onClose={()=>setSelected(null)} width={540}>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:20 }}>
+            {[['Worker',selected.workers?.name],['Phone',selected.workers?.phone],['UPI ID',selected.workers?.upi_id||'—'],['Payout Amount',INR(selected.amount)],['Commission',INR(selected.commission_amount||0)],['Status',<Badge status={selected.status||'pending'} />],['UTR',selected.utr||'Not yet paid'],['Notes',selected.notes||'—'],['Created',fmt(selected.created_at)],['Paid At',fmt(selected.paid_at)]].map(([l,v])=>(
+              <div key={l} style={{ background:'#f8fafc', borderRadius:8, padding:'10px 14px' }}>
+                <div style={{ fontSize:11, color:'#64748b', fontWeight:600, marginBottom:3 }}>{l}</div>
+                <div style={{ fontWeight:600, fontSize:13 }}>{v||'—'}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{ display:'flex', gap:8 }}>
+            {selected.status==='pending' && <>
+              <button onClick={()=>{ setSelected(null); setPayNow(selected); setUtrInput('') }} style={btnS('#10b981')}>Pay Now</button>
+              <button disabled={saving} onClick={()=>failPayout(selected.id)} style={btnS('#ef4444')}>Mark Failed</button>
+            </>}
+          </div>
+        </Modal>
+      )}
+
+      {/* ── CREATE PAYOUT MODAL ───────────────────────────────── */}
+      {showCreate && (
+        <Modal title="Create New Payout" onClose={()=>setShowCreate(false)} width={480}>
+          <div>
+            <label style={{ fontSize:13, fontWeight:600, display:'block', marginBottom:6 }}>Worker</label>
+            <select style={inp} value={newPayout.worker_id} onChange={e=>setNewPayout(p=>({...p,worker_id:e.target.value}))}>
+              <option value="">Select worker...</option>
+              {workers.map(w=><option key={w.id} value={w.id}>{w.name} — {w.upi_id||'No UPI'} ({w.phone})</option>)}
+            </select>
+            <label style={{ fontSize:13, fontWeight:600, display:'block', marginBottom:6 }}>Payout Amount (Rs.)</label>
+            <input style={inp} type="number" placeholder="Amount worker receives..." value={newPayout.amount} onChange={e=>setNewPayout(p=>({...p,amount:e.target.value}))} />
+            <label style={{ fontSize:13, fontWeight:600, display:'block', marginBottom:6 }}>Notes (optional)</label>
+            <input style={inp} placeholder="Week of, special note..." value={newPayout.notes} onChange={e=>setNewPayout(p=>({...p,notes:e.target.value}))} />
+            {newPayout.amount && (
+              <div style={{ padding:'10px 14px', background:'#f0fdf4', borderRadius:8, marginBottom:12, fontSize:13 }}>
+                <b>Worker receives:</b> {INR(parseInt(newPayout.amount||0))} &nbsp;|&nbsp;
+                <b>Commission (10%):</b> {INR(Math.round(parseInt(newPayout.amount||0)*0.1))}
+              </div>
+            )}
+            <button disabled={saving} onClick={createPayout} style={{...btnS('#6366f1'),width:'100%',padding:'12px'}}>
+              {saving ? 'Creating...' : 'Create Payout'}
+            </button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  )
+}

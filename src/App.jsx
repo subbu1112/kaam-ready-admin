@@ -15,17 +15,17 @@ const IDLE_MS = 30 * 60 * 1000
 
 // ── Design tokens ──────────────────────────────────────────────────────────
 const C = {
-  bg:       '#F0F4FF',
-  sidebar:  '#FFFFFF',
-  primary:  '#6366F1',     // indigo
-  primaryD: '#4338CA',
-  accent:   '#F59E0B',     // amber
-  success:  '#10B981',
+  bg:       '#0F0F0F',
+  sidebar:  '#1C1C1E',
+  primary:  '#F5C000',     // yellow
+  primaryD: '#D4A017',
+  accent:   '#F5C000',
+  success:  '#22c55e',
   danger:   '#EF4444',
-  text:     '#0F172A',
-  muted:    '#64748B',
-  border:   '#E2E8F0',
-  card:     '#FFFFFF',
+  text:     '#FFFFFF',
+  muted:    '#636366',
+  border:   '#2a2a2a',
+  card:     '#1a1a1a',
 }
 
 const NAV = [
@@ -138,7 +138,7 @@ export default function App() {
                 style={{ width:'100%', display:'flex', alignItems:'center', gap:12, padding:'10px 10px', marginBottom:2,
                   background: active ? C.primary : 'transparent',
                   borderRadius:10, border:'none', cursor:'pointer', fontFamily:'inherit',
-                  color: active ? '#fff' : C.muted, fontWeight: active ? 700 : 500, fontSize:14,
+                  color: active ? '#000' : C.muted, fontWeight: active ? 700 : 500, fontSize:14,
                   position:'relative', transition:'background .15s' }}>
                 <span style={{ fontSize:18, flexShrink:0 }}>{n.ico}</span>
                 {sideOpen && <span style={{ flex:1, textAlign:'left' }}>{n.label}</span>}
@@ -176,12 +176,12 @@ export default function App() {
           <div style={{ display:'flex', alignItems:'center', gap:12 }}>
             {pending > 0 && (
               <button onClick={() => setPage('payments')}
-                style={{ background:'#FEF2F2', border:'1px solid #FECACA', borderRadius:10, padding:'6px 14px',
+                style={{ background:'#2d0a0a', border:'1px solid #7f1d1d', borderRadius:10, padding:'6px 14px',
                   fontSize:12, fontWeight:700, cursor:'pointer', color:C.danger, fontFamily:'inherit' }}>
                 🔔 {pending} payment{pending!==1?'s':''} pending approval
               </button>
             )}
-            <div style={{ background:C.primary, color:'#fff', width:34, height:34, borderRadius:10, display:'flex', alignItems:'center', justifyContent:'center', fontSize:14, fontWeight:800 }}>
+            <div style={{ background:C.primary, color:'#000', width:34, height:34, borderRadius:10, display:'flex', alignItems:'center', justifyContent:'center', fontSize:14, fontWeight:800 }}>
               A
             </div>
           </div>
@@ -201,9 +201,9 @@ export default function App() {
 }
 
 function ToastBar({ toast }) {
-  const bg = toast.type==='error' ? '#EF4444' : toast.type==='success' ? '#10B981' : '#6366F1'
+  const bg = toast.type==='error' ? '#EF4444' : toast.type==='success' ? '#22c55e' : '#F5C000'
   return (
-    <div style={{ position:'fixed', bottom:24, left:'50%', transform:'translateX(-50%)', background:bg, color:'#fff', borderRadius:12, padding:'12px 20px', fontSize:14, fontWeight:600, zIndex:9999, boxShadow:'0 4px 20px rgba(0,0,0,.2)', maxWidth:360, textAlign:'center' }}>
+    <div style={{ position:'fixed', bottom:24, left:'50%', transform:'translateX(-50%)', background:bg, color: bg==='#F5C000' ? '#000' : '#fff', borderRadius:12, padding:'12px 20px', fontSize:14, fontWeight:600, zIndex:9999, boxShadow:'0 4px 20px rgba(0,0,0,.2)', maxWidth:360, textAlign:'center' }}>
       {toast.msg}
     </div>
   )
