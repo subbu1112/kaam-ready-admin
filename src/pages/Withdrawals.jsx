@@ -38,23 +38,26 @@ export default function Withdrawals({ showToast }) {
     const { error } = await sb.from('withdrawals').update({
       status:'paid', utr: utr.trim(), processed_at: new Date().toISOString(),
     }).eq('id', payNow.id)
+    if (error) { setSaving(false); showToast && showToast(error.message); return }
+    // Deduct the wallet at payout time (admin-authorized, atomic RPC). The worker
+    // app reserves funds via "available = wallet − pending" but never writes balance.
+    const { error: wErr } = await sb.rpc('increment_wallet', { worker_id: payNow.worker_id, amount: -Math.abs(Number(payNow.amount) || 0) })
     setSaving(false)
-    if (error) { showToast && showToast(error.message); return }
+    if (wErr) { showToast && showToast('Paid, but wallet not deducted: ' + wErr.message); }
     setPayNow(null); setUtr('')
-    showToast && showToast('Marked as paid — worker notified ✓')
+    showToast && showToast('Marked as paid & wallet deducted — worker notified ✓')
     load()
   }
 
-  // Rejecting a request refunds the amount back to the worker's wallet,
-  // because the worker app deducts the balance optimistically on request.
+  // Rejecting just closes the request. No wallet change is needed because the
+  // balance is only deducted on payout, not at request time.
   async function reject(w) {
-    if (!confirm(`Reject ${INR(w.amount)} withdrawal for ${w.workers?.name||'worker'}? The amount returns to their wallet.`)) return
+    if (!confirm(`Reject ${INR(w.amount)} withdrawal for ${w.workers?.name||'worker'}?`)) return
     setSaving(true)
-    await sb.from('withdrawals').update({ status:'rejected', processed_at:new Date().toISOString() }).eq('id', w.id)
-    const bal = Number(w.workers?.wallet_balance) || 0
-    await sb.from('workers').update({ wallet_balance: bal + (Number(w.amount)||0) }).eq('id', w.worker_id)
+    const { error } = await sb.from('withdrawals').update({ status:'rejected', processed_at:new Date().toISOString() }).eq('id', w.id)
     setSaving(false)
-    showToast && showToast('Rejected and refunded to wallet')
+    if (error) { showToast && showToast(error.message); return }
+    showToast && showToast('Withdrawal rejected — worker notified')
     load()
   }
 
