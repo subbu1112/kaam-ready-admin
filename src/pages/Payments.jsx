@@ -202,7 +202,7 @@ export default function Payments() {
                       <td style={td}><span style={{ fontWeight:700, color:'#10b981' }}>{INR(p.amount)}</span></td>
                       <td style={td}>{p.payment_method||'UPI'}</td>
                       <td style={td}>{statusBadge(p.payment_status)}</td>
-                      <td style={td} style={{ ...td, fontSize:12, color:'#64748b' }}>{fmt(p.created_at)}</td>
+                      <td style={{ ...td, fontSize:12, color:'#64748b' }}>{fmt(p.created_at)}</td>
                       <td style={td}>
                         <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
                           {p.payment_status==='pending_verification' && <>

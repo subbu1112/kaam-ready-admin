@@ -63,10 +63,13 @@ export default function Settings({ user, showToast }) {
       { key:'support_phone',     value: supportPh },
       { key:'support_email',     value: supportMail },
     ]
-    for (const r of rows) {
-      await sb.from('app_settings').upsert(r, { onConflict:'key' })
+    const { error } = await sb.from('app_settings').upsert(rows, { onConflict:'key' })
+    if (error) {
+      showToast('Save failed: ' + error.message, 'error')
+      setSaving(false)
+      return
     }
-    await sb.from('admin_logs').insert({ admin_id: user.id, action:'update_settings', details: { fields: rows.map(r=>r.key) } }).then(()=>{})
+    await sb.from('admin_logs').insert({ admin_id: user.id, action:'update_settings', details: { fields: rows.map(r=>r.key) } })
     showToast('Settings saved', 'success')
     setSaving(false)
   }

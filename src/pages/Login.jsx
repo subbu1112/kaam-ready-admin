@@ -13,8 +13,9 @@ export default function Login({ onLogin }) {
   async function handleSubmit(e) {
     e.preventDefault()
     setErr(''); setLoading(true)
-    const ADMIN = import.meta.env.VITE_ADMIN_EMAIL || 'admin@kaamready.in'
-    if (email.toLowerCase().trim() !== ADMIN) { setErr('Not an admin account'); setLoading(false); return }
+    // Admin authorization is enforced server-side by the admin-verify Edge
+    // Function against the admin_users table (multi-admin). No client-side
+    // email allowlist, so any provisioned admin can sign in.
 
     // Step 1: sign in with Supabase
     const { data: authData, error: authErr } = await sb.auth.signInWithPassword({ email: email.trim(), password: pass })

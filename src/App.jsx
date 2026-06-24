@@ -12,6 +12,7 @@ const Support          = lazy(() => import('./pages/Support'))
 const Settings         = lazy(() => import('./pages/Settings'))
 const Payments         = lazy(() => import('./pages/Payments'))
 const Payouts          = lazy(() => import('./pages/Payouts'))
+const Withdrawals      = lazy(() => import('./pages/Withdrawals'))
 const Logs             = lazy(() => import('./pages/Logs'))
 const Escrow           = lazy(() => import('./pages/Escrow'))
 const Wallets          = lazy(() => import('./pages/Wallets'))
@@ -54,6 +55,7 @@ const NAV_GROUPS = [
       { id:'escrow',      ico:'◆',  label:'Escrow'       },
       { id:'wallets',     ico:'◇',  label:'Wallets'      },
       { id:'withdrawals', ico:'↑',  label:'Withdrawals'  },
+      { id:'payouts',     ico:'⇪',  label:'Payouts'      },
       { id:'finance',     ico:'$',  label:'Finance'      },
     ]
   },
@@ -168,7 +170,8 @@ export default function App() {
     payments:    <PaymentApprovals {...ctx}/>,
     escrow:      <Escrow           {...ctx}/>,
     wallets:     <Wallets          {...ctx}/>,
-    withdrawals: <Payouts          {...ctx}/>,
+    withdrawals: <Withdrawals      {...ctx}/>,
+    payouts:     <Payouts          {...ctx}/>,
     finance:     <Finance          {...ctx}/>,
     support:     <Support          {...ctx}/>,
     complaints:  <Complaints       {...ctx}/>,
