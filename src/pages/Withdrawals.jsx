@@ -33,7 +33,7 @@ export default function Withdrawals({ showToast }) {
 
   async function markPaid() {
     if (!payNow) return
-    if (!utr.trim()) { alert('Enter the UTR / transaction reference.'); return }
+    if (!utr.trim()) { showToast ? showToast('Enter the UTR / transaction reference.') : alert('Enter the UTR / transaction reference.'); return }
     setSaving(true)
     const { error } = await sb.from('withdrawals').update({
       status:'paid', utr: utr.trim(), processed_at: new Date().toISOString(),

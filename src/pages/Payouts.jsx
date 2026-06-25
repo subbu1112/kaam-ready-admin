@@ -12,7 +12,7 @@ const fmt = d => d ? new Date(d).toLocaleString('en-IN',{day:'2-digit',month:'sh
 const INR = v => 'Rs.' + (v||0).toLocaleString('en-IN')
 function btnS(bg,size='md') { return { background:bg,color:'#fff',border:'none',borderRadius:size==='sm'?6:8,padding:size==='sm'?'5px 10px':'9px 16px',fontSize:size==='sm'?12:13,fontWeight:600,cursor:'pointer',whiteSpace:'nowrap' } }
 
-export default function Payouts() {
+export default function Payouts({ showToast }) {
   const [payouts, setPayouts] = useState([])
   const [workers, setWorkers] = useState([])
   const [loading, setLoading] = useState(true)
@@ -40,7 +40,7 @@ export default function Payouts() {
 
   async function confirmPayment() {
     if (!payNow) return
-    if (!utrInput.trim()) { alert('Please enter the UTR / transaction reference number.'); return }
+    if (!utrInput.trim()) { showToast ? showToast('Please enter the UTR / transaction reference number.') : alert('Please enter the UTR / transaction reference number.'); return }
     setSaving(true)
     const { data: { user } } = await sb.auth.getUser()
     await sb.from('payouts').update({
