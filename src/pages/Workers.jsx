@@ -12,7 +12,7 @@ function KycBadge({ status }) {
 }
 
 function StatusBadge({ status }) {
-  const m = { active:['#D1FAE5','#065F46','Active'], suspended:['#FEE2E2','#991B1B','Suspended'], blocked:['#FEE2E2','#991B1B','Blocked'] }
+  const m = { active:['#D1FAE5','#065F46','Active'], suspended:['#FEE2E2','#991B1B','Suspended'], blocked:['#FEE2E2','#991B1B','Blocked'], deleted:['#E5E7EB','#374151','Deleted'] }
   const [bg,col,lbl] = m[status||'active'] || ['#D1FAE5','#065F46','Active']
   return <span style={{ background:bg, color:col, fontSize:11, fontWeight:700, padding:'3px 9px', borderRadius:20 }}>{lbl}</span>
 }
@@ -60,6 +60,28 @@ export default function Workers({ user, showToast }) {
     setSaving(false)
     setSelected(s => s ? { ...s, account_status: status } : null)
     showToast('Worker ' + status, 'success')
+  }
+
+  // Delete a worker account. Hard-deletes clean accounts; if the worker has job
+  // or payout history (protected by NO ACTION foreign keys), the account is
+  // archived instead so financial/accounting records are preserved.
+  async function deleteWorker(w) {
+    if (!confirm(`Delete worker "${w.name || ''}"?\n\nIf they have job or payout history the account is ARCHIVED (records kept). Otherwise it is permanently deleted.`)) return
+    setSaving(true)
+    const { error } = await sb.from('workers').delete().eq('id', w.id)
+    if (error) {
+      const { error: e2 } = await sb.from('workers').update({ account_status: 'deleted', is_online: false }).eq('id', w.id)
+      setSaving(false)
+      if (e2) { showToast('Delete failed: ' + e2.message, 'error'); return }
+      await sb.from('admin_logs').insert({ admin_id: user.id, action: 'archive_worker', target_id: w.id, details: { reason: 'has_history' } }).then(() => {})
+      showToast('Worker archived — had history, records preserved', 'success')
+    } else {
+      setSaving(false)
+      await sb.from('admin_logs').insert({ admin_id: user.id, action: 'delete_worker', target_id: w.id, details: {} }).then(() => {})
+      showToast('Worker account deleted', 'success')
+    }
+    setSelected(null)
+    load()
   }
 
   const filtered = workers.filter(w => {
@@ -203,6 +225,8 @@ export default function Workers({ user, showToast }) {
                   : <button onClick={()=>updateStatus(selected.id,'active')} disabled={saving}
                       style={{ background:C.success, color:'#fff', border:'none', borderRadius:10, padding:'10px 20px', fontWeight:700, fontSize:13, cursor:'pointer', fontFamily:'inherit' }}>✓ Restore</button>
                 }
+                <button onClick={()=>deleteWorker(selected)} disabled={saving}
+                  style={{ background:'#7f1d1d', color:'#fff', border:'none', borderRadius:10, padding:'10px 20px', fontWeight:700, fontSize:13, cursor:'pointer', fontFamily:'inherit' }}>🗑 Delete Account</button>
               </div>
               {bkgs.length > 0 && (
                 <div>
