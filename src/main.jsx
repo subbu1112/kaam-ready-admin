@@ -5,10 +5,22 @@ import App from './App'
 import './index.css'
 
 // Auto-recover from stale lazy-loaded chunks after a new deploy.
+// Guarded: privacy modes can block sessionStorage; fall back to a URL flag
+// so the reload still happens exactly once.
 window.addEventListener('vite:preloadError', () => {
-  if (!sessionStorage.getItem('kr_reloaded_stale')) {
-    sessionStorage.setItem('kr_reloaded_stale', '1')
-    window.location.reload()
+  try {
+    if (!sessionStorage.getItem('kr_reloaded_stale')) {
+      sessionStorage.setItem('kr_reloaded_stale', '1')
+      window.location.reload()
+    }
+  } catch {
+    try {
+      const url = new URL(window.location.href)
+      if (url.searchParams.get('kr_r') !== '1') {
+        url.searchParams.set('kr_r', '1')
+        window.location.replace(url.toString())
+      }
+    } catch { /* ignore */ }
   }
 })
 
