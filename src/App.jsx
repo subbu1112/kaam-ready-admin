@@ -194,7 +194,7 @@ export default function App() {
 
           {/* Logo */}
           <div style={{padding: collapsed ? '20px 0' : '24px 20px',borderBottom:'1px solid #1E1E1E',display:'flex',alignItems:'center',gap:12,flexShrink:0,justifyContent:collapsed?'center':'flex-start'}}>
-            <div style={{width:36,height:36,background:'linear-gradient(135deg,#FFD700,#FFC107)',borderRadius:10,display:'flex',alignItems:'center',justifyContent:'center',fontSize:18,fontWeight:900,color:'#000',flexShrink:0,boxShadow:'0 4px 12px rgba(255,215,0,.3)'}}>⚡</div>
+            <img src="/icon-192.png" alt="KaamReady" style={{width:36,height:36,borderRadius:10,flexShrink:0,boxShadow:'0 4px 12px rgba(255,215,0,.3)'}} />
             {!collapsed && (
               <div>
                 <div style={{fontWeight:900,fontSize:16,letterSpacing:1,background:'linear-gradient(90deg,#FFD700,#FFC107)',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent'}}>KAAMREADY</div>
