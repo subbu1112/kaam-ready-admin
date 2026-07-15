@@ -54,12 +54,17 @@ export default function Bookings({ user, showToast }) {
     if (statusF !== 'all') q = q.eq('status', statusF)
     const { data, count } = await q
     let rows = data || []
-    // Enrich each booking with the customer's email (bookings.user_id → profiles.id)
+    // Enrich each booking with the customer's real email/phone from auth.users,
+    // via a secure admin-only DB function (customers' contact lives in auth, not profiles).
     const ids = [...new Set(rows.map(b => b.user_id).filter(Boolean))]
     if (ids.length) {
-      const { data: profs } = await sb.from('profiles').select('id,email').in('id', ids)
-      const emailMap = Object.fromEntries((profs || []).map(p => [p.id, p.email]))
-      rows = rows.map(b => ({ ...b, customer_email: emailMap[b.user_id] || null }))
+      const { data: contacts } = await sb.rpc('admin_get_customer_contacts', { p_ids: ids })
+      const map = Object.fromEntries((contacts || []).map(c => [c.id, c]))
+      rows = rows.map(b => ({
+        ...b,
+        customer_email: map[b.user_id]?.email || null,
+        customer_phone: b.customer_phone || map[b.user_id]?.phone || null,
+      }))
     }
     setBookings(rows)
     setTotal(count || 0)

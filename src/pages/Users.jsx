@@ -25,7 +25,20 @@ export default function Users({ user, showToast }) {
     const from = pg * PAGE, to = from + PAGE - 1
     let q = sb.from('profiles').select('*', { count:'exact' }).order('created_at', { ascending: false }).range(from, to)
     const { data, count } = await q
-    setUsers(data || [])
+    let rows = data || []
+    // Fill in real email/phone from auth.users (admin-only secure function),
+    // since profiles.email/phone are often empty.
+    const ids = rows.map(u => u.id).filter(Boolean)
+    if (ids.length) {
+      const { data: contacts } = await sb.rpc('admin_get_customer_contacts', { p_ids: ids })
+      const map = Object.fromEntries((contacts || []).map(c => [c.id, c]))
+      rows = rows.map(u => ({
+        ...u,
+        email: u.email || map[u.id]?.email || null,
+        phone: u.phone || map[u.id]?.phone || null,
+      }))
+    }
+    setUsers(rows)
     setTotal(count || 0)
     setLoading(false)
   }
