@@ -48,19 +48,27 @@ export default function Bookings({ user, showToast }) {
     setPage(pg)
     const from = pg*PAGE, to = from+PAGE-1
     let q = sb.from('bookings')
-      .select('id,status,payment_status,amount,service,customer_name,customer_phone,worker_id,created_at,city,worker:workers(name,phone)', { count:'exact' })
+      .select('id,status,payment_status,amount,service,customer_name,customer_phone,user_id,worker_id,created_at,city,worker:workers(name,phone)', { count:'exact' })
       .order('created_at', { ascending: false })
       .range(from, to)
     if (statusF !== 'all') q = q.eq('status', statusF)
     const { data, count } = await q
-    setBookings(data || [])
+    let rows = data || []
+    // Enrich each booking with the customer's email (bookings.user_id → profiles.id)
+    const ids = [...new Set(rows.map(b => b.user_id).filter(Boolean))]
+    if (ids.length) {
+      const { data: profs } = await sb.from('profiles').select('id,email').in('id', ids)
+      const emailMap = Object.fromEntries((profs || []).map(p => [p.id, p.email]))
+      rows = rows.map(b => ({ ...b, customer_email: emailMap[b.user_id] || null }))
+    }
+    setBookings(rows)
     setTotal(count || 0)
     setLoading(false)
   }
 
   const filtered = bookings.filter(b => {
     const q = search.toLowerCase()
-    const mQ = !q || (b.customer_name||'').toLowerCase().includes(q) || (b.customer_phone||'').includes(q) || (b.service||'').toLowerCase().includes(q) || (b.worker?.name||'').toLowerCase().includes(q)
+    const mQ = !q || (b.customer_name||'').toLowerCase().includes(q) || (b.customer_phone||'').includes(q) || (b.customer_email||'').toLowerCase().includes(q) || (b.service||'').toLowerCase().includes(q) || (b.worker?.name||'').toLowerCase().includes(q)
     const mP = payF==='all' || b.payment_status===payF || (payF==='none'&&!b.payment_status)
     return mQ && mP
   })
@@ -82,7 +90,7 @@ export default function Bookings({ user, showToast }) {
 
       <div style={{ background:C.card, borderRadius:16, border:'1px solid '+C.border, overflow:'hidden' }}>
         <div style={{ padding:'14px 18px', borderBottom:'1px solid '+C.border, display:'flex', gap:10, alignItems:'center', flexWrap:'wrap' }}>
-          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search customer, worker, service..."
+          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search customer, email, phone, worker, service..."
             style={{ padding:'9px 14px', border:'1.5px solid '+C.border, borderRadius:10, fontSize:13, width:260, outline:'none', fontFamily:'inherit', background:C.bg }} />
           <div style={{ display:'flex', gap:5, flexWrap:'wrap' }}>
             {STATUSES.map(f=>(
@@ -112,7 +120,7 @@ export default function Bookings({ user, showToast }) {
                   <tr key={b.id}>
                     <td style={td}><p style={{ fontWeight:600, fontFamily:'monospace', fontSize:12 }}>{b.id.slice(0,8).toUpperCase()}</p><p style={{ fontSize:11, color:C.muted }}>{b.city||'—'}</p></td>
                     <td style={td}>{b.service||'—'}</td>
-                    <td style={td}><p style={{ fontWeight:600 }}>{b.customer_name||'—'}</p><p style={{ fontSize:11, color:C.muted }}>{b.customer_phone||'—'}</p></td>
+                    <td style={td}><p style={{ fontWeight:600 }}>{b.customer_name||'—'}</p><p style={{ fontSize:11, color:C.muted }}>{b.customer_phone||'—'}</p>{b.customer_email && <p style={{ fontSize:11, color:C.muted }}>✉ {b.customer_email}</p>}</td>
                     <td style={td}><p style={{ fontWeight:600 }}>{b.worker?.name||'—'}</p><p style={{ fontSize:11, color:C.muted }}>{b.worker?.phone||'—'}</p></td>
                     <td style={td}><span style={{ fontWeight:700 }}>{b.amount ? INR(b.amount) : '—'}</span></td>
                     <td style={td}><PayBadge status={b.payment_status} /></td>
@@ -156,7 +164,7 @@ export default function Bookings({ user, showToast }) {
                 <PayBadge status={selected.payment_status} />
               </div>
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
-                {[['Customer',selected.customer_name],['Customer Phone',selected.customer_phone],['Worker',selected.worker?.name],['Worker Phone',selected.worker?.phone],['Service',selected.service],['City',selected.city],['Amount',selected.amount?INR(selected.amount):null],['Date',fmt(selected.created_at)]].filter(([,v])=>v).map(([l,v])=>(
+                {[['Customer',selected.customer_name],['Customer Phone',selected.customer_phone],['Customer Email',selected.customer_email],['Worker',selected.worker?.name],['Worker Phone',selected.worker?.phone],['Service',selected.service],['City',selected.city],['Amount',selected.amount?INR(selected.amount):null],['Booked On',fmt(selected.created_at)]].filter(([,v])=>v).map(([l,v])=>(
                   <div key={l} style={{ background:C.bg, borderRadius:10, padding:'10px 14px' }}>
                     <p style={{ fontSize:11, color:C.muted, fontWeight:700, marginBottom:3 }}>{l}</p>
                     <p style={{ fontWeight:600, fontSize:13 }}>{v}</p>

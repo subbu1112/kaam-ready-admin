@@ -5,6 +5,7 @@ const Login            = lazy(() => import('./pages/Login'))
 const Dashboard        = lazy(() => import('./pages/Dashboard'))
 const PaymentApprovals = lazy(() => import('./pages/PaymentApprovals'))
 const Workers          = lazy(() => import('./pages/Workers'))
+const Approvals        = lazy(() => import('./pages/Approvals'))
 const Users            = lazy(() => import('./pages/Users'))
 const Bookings         = lazy(() => import('./pages/Bookings'))
 const Reports          = lazy(() => import('./pages/Reports'))
@@ -45,6 +46,7 @@ const NAV_GROUPS = [
       { id:'bookings',    ico:'≡',  label:'Bookings'     },
       { id:'customers',   ico:'◉',  label:'Customers'    },
       { id:'workers',     ico:'◈',  label:'Workers'      },
+      { id:'approvals',   ico:'✓',  label:'Approvals'    },
       { id:'services',    ico:'⬡',  label:'Services'     },
     ]
   },
@@ -166,6 +168,7 @@ export default function App() {
     bookings:    <Bookings         {...ctx}/>,
     customers:   <Users            {...ctx}/>,
     workers:     <Workers          {...ctx}/>,
+    approvals:   <Approvals        {...ctx}/>,
     services:    <Services         {...ctx}/>,
     payments:    <PaymentApprovals {...ctx}/>,
     escrow:      <Escrow           {...ctx}/>,
@@ -281,7 +284,7 @@ export default function App() {
           </header>
 
           {/* Page */}
-          <main style={{flex:1,overflowY:'auto',padding:24,
+          <main style={{flex:1,overflowY:'auto',padding:24,background:'#F1F5F9',color:'#1E293B',
             '--primary':C.primary,'--primary-h':C.primaryH,'--success':C.success,'--danger':C.danger,
             '--warning':C.warning,'--border':C.border,'--card':C.card,'--muted':C.muted,'--bg':C.bg,'--dim':C.dim}}>
             <div className="page-content" key={page}>
