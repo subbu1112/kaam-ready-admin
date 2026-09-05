@@ -10,7 +10,6 @@
  */
 
 const EDGE_FN_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-notification`
-const ANON_KEY    = import.meta.env.VITE_SUPABASE_ANON_KEY
 
 /**
  * Send a notification for a platform event.
@@ -25,11 +24,19 @@ export async function notify(event, phone, email = null, data = {}, channels = [
     const body = { event, recipient: phone, data, channels }
     if (email && channels.includes('email')) body.email = email
 
+    // Send the signed-in admin's access token, not the publishable anon key.
+    // The anon key is in every browser bundle, so it proves nothing; the edge
+    // function now checks the caller is a real, active admin before it will
+    // send an SMS or WhatsApp message to anybody.
+    const { sb } = await import('./supabase')
+    const { data: { session } } = await sb.auth.getSession()
+    if (!session?.access_token) { console.warn('[notify] not signed in'); return null }
+
     const res = await fetch(EDGE_FN_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${ANON_KEY}`,
+        'Authorization': `Bearer ${session.access_token}`,
       },
       body: JSON.stringify(body),
     })
