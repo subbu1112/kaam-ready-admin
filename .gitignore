@@ -1,0 +1,15 @@
+# dependencies
+node_modules/
+
+# local env — never commit these
+.env
+.env.local
+.env.*.local
+
+# build output
+dist/
+
+# misc
+*.log
+.DS_Store
+vite.config.js.timestamp-*
