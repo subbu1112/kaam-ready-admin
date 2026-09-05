@@ -119,7 +119,22 @@ export default function App() {
   const [toast,    setToast]    = useState(null)
   const [pending,  setPending]  = useState(0)
   const [collapsed,setCollapsed]= useState(false)
+  // The admin panel is desktop-first, but it gets opened on a phone often
+  // enough (approving a payment, checking a booking) that the sidebar has to
+  // get out of the way rather than eat half the screen.
+  const [narrow,   setNarrow]   = useState(() => typeof window !== 'undefined' && window.innerWidth < 1024)
+  const [drawer,   setDrawer]   = useState(false)
   const idleTimer = useRef(null)
+
+  useEffect(() => {
+    const onResize = () => {
+      const isNarrow = window.innerWidth < 1024
+      setNarrow(isNarrow)
+      if (!isNarrow) setDrawer(false)
+    }
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
 
   useEffect(() => {
     sb.auth.getSession().then(({data}) => { if (data.session?.user) setUser(data.session.user) })
@@ -185,20 +200,40 @@ export default function App() {
   }
 
   const currentNav = ALL_NAV.find(n=>n.id===page)||ALL_NAV[0]
-  const W = collapsed ? 64 : 240
+  const W = narrow ? 260 : (collapsed ? 64 : 240)
+  const goto = id => { setPage(id); if (narrow) setDrawer(false) }
 
   return (
     <>
       <style>{CSS}</style>
-      <div style={{display:'flex',height:'100vh',background:C.bg,overflow:'hidden',fontFamily:"'Inter',sans-serif"}}>
+      <div style={{display:'flex',height:'100dvh',background:C.bg,overflow:'hidden',fontFamily:"'Inter',sans-serif"}}>
 
-        {/* ── Sidebar ── */}
-        <aside style={{width:W,minWidth:W,background:C.sidebar,borderRight:'1px solid #1E1E1E',display:'flex',flexDirection:'column',transition:'width .2s cubic-bezier(.4,0,.2,1)',overflow:'hidden',position:'relative',zIndex:10}}>
+        {/* Backdrop behind the mobile drawer */}
+        {narrow && drawer && (
+          <div onClick={()=>setDrawer(false)}
+            style={{position:'fixed',inset:0,background:'rgba(0,0,0,.55)',zIndex:40}} />
+        )}
+
+        {/* ── Sidebar (fixed drawer on narrow screens) ── */}
+        <aside style={{
+          width:W, minWidth:W, background:C.sidebar, borderRight:'1px solid #1E1E1E',
+          display:'flex', flexDirection:'column', overflow:'hidden',
+          transition: narrow ? 'transform .22s cubic-bezier(.4,0,.2,1)' : 'width .2s cubic-bezier(.4,0,.2,1)',
+          ...(narrow
+            ? { position:'fixed', top:0, bottom:0, left:0, zIndex:50,
+                transform: drawer ? 'translateX(0)' : 'translateX(-100%)',
+                boxShadow: drawer ? '0 0 40px rgba(0,0,0,.5)' : 'none' }
+            : { position:'relative', zIndex:10 }),
+        }}>
 
           {/* Logo */}
-          <div style={{padding: collapsed ? '20px 0' : '24px 20px',borderBottom:'1px solid #1E1E1E',display:'flex',alignItems:'center',gap:12,flexShrink:0,justifyContent:collapsed?'center':'flex-start'}}>
+          <div style={{padding: (collapsed && !narrow) ? '20px 0' : '24px 20px',borderBottom:'1px solid #1E1E1E',display:'flex',alignItems:'center',gap:12,flexShrink:0,justifyContent:(collapsed && !narrow)?'center':'flex-start'}}>
+            {narrow && (
+              <button onClick={()=>setDrawer(false)} aria-label="Close menu"
+                style={{marginLeft:'auto',background:'none',border:'none',color:C.muted,fontSize:20,cursor:'pointer',fontFamily:'inherit'}}>✕</button>
+            )}
             <img src="/icon-192.png" alt="KaamReady" style={{width:36,height:36,borderRadius:10,flexShrink:0,boxShadow:'0 4px 12px rgba(255,215,0,.3)'}} />
-            {!collapsed && (
+            {(!collapsed || narrow) && (
               <div>
                 <div style={{fontWeight:900,fontSize:16,letterSpacing:1,background:'linear-gradient(90deg,#FFD700,#FFC107)',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent'}}>KAAMREADY</div>
                 <div style={{fontSize:9,color:C.dim,letterSpacing:.5,marginTop:1,lineHeight:1.3}}>India's Trusted Workforce Platform</div>
@@ -210,15 +245,15 @@ export default function App() {
           <nav style={{flex:1,overflowY:'auto',padding:'12px 8px'}}>
             {NAV_GROUPS.map(group => (
               <div key={group.label} style={{marginBottom:8}}>
-                {!collapsed && <div style={{fontSize:9,fontWeight:700,color:C.dim,letterSpacing:1.5,padding:'8px 10px 4px',marginBottom:2}}>{group.label}</div>}
+                {(!collapsed || narrow) && <div style={{fontSize:9,fontWeight:700,color:C.dim,letterSpacing:1.5,padding:'8px 10px 4px',marginBottom:2}}>{group.label}</div>}
                 {group.items.map(n => {
                   const active = page===n.id
                   return (
-                    <button key={n.id} className="nav-item" onClick={()=>setPage(n.id)}
+                    <button key={n.id} className="nav-item" onClick={()=>goto(n.id)}
                       style={{
                         width:'100%', display:'flex', alignItems:'center', gap:10,
-                        padding: collapsed ? '10px 0' : '9px 12px',
-                        justifyContent: collapsed ? 'center' : 'flex-start',
+                        padding: (collapsed && !narrow) ? '10px 0' : '9px 12px',
+                        justifyContent: (collapsed && !narrow) ? 'center' : 'flex-start',
                         marginBottom:2, borderRadius:10, border:'none', cursor:'pointer',
                         fontFamily:"'Inter',sans-serif",
                         background: active ? 'rgba(255,215,0,.12)' : 'transparent',
@@ -229,14 +264,14 @@ export default function App() {
                         position:'relative',
                       }}>
                       <span className="ico" style={{fontSize:15,color: active ? C.primary : C.dim,flexShrink:0,width:18,textAlign:'center'}}>{n.ico}</span>
-                      {!collapsed && <span style={{flex:1,textAlign:'left'}}>{n.label}</span>}
+                      {(!collapsed || narrow) && <span style={{flex:1,textAlign:'left'}}>{n.label}</span>}
                       {n.badge && pending>0 && (
                         <span style={{
                           background:C.danger, color:'#fff', borderRadius:10, fontSize:10,
                           fontWeight:800, padding:'1px 6px', minWidth:18, textAlign:'center',
                           flexShrink:0, animation:'badgePulse 2s infinite',
-                          position: collapsed ? 'absolute' : 'relative',
-                          top: collapsed ? 4 : 'auto', right: collapsed ? 4 : 'auto'
+                          position: (collapsed && !narrow) ? 'absolute' : 'relative',
+                          top: (collapsed && !narrow) ? 4 : 'auto', right: (collapsed && !narrow) ? 4 : 'auto'
                         }}>{pending}</span>
                       )}
                     </button>
@@ -248,15 +283,17 @@ export default function App() {
 
           {/* Bottom */}
           <div style={{padding:'12px 8px',borderTop:'1px solid #1E1E1E'}}>
-            <button onClick={()=>setCollapsed(p=>!p)}
-              style={{width:'100%',display:'flex',alignItems:'center',justifyContent:collapsed?'center':'flex-start',gap:10,padding:'9px 12px',background:'transparent',border:'none',cursor:'pointer',color:C.dim,fontSize:13,fontFamily:"'Inter',sans-serif",borderRadius:10,marginBottom:4,transition:'all .15s'}}>
-              <span style={{fontSize:16}}>{collapsed?'▶':'◀'}</span>
-              {!collapsed && <span>Collapse</span>}
-            </button>
+            {!narrow && (
+              <button onClick={()=>setCollapsed(p=>!p)}
+                style={{width:'100%',display:'flex',alignItems:'center',justifyContent:collapsed?'center':'flex-start',gap:10,padding:'9px 12px',background:'transparent',border:'none',cursor:'pointer',color:C.dim,fontSize:13,fontFamily:"'Inter',sans-serif",borderRadius:10,marginBottom:4,transition:'all .15s'}}>
+                <span style={{fontSize:16}}>{collapsed?'▶':'◀'}</span>
+                {!collapsed && <span>Collapse</span>}
+              </button>
+            )}
             <button onClick={()=>sb.auth.signOut()}
-              style={{width:'100%',display:'flex',alignItems:'center',justifyContent:collapsed?'center':'flex-start',gap:10,padding:'9px 12px',background:'transparent',border:'none',cursor:'pointer',color:C.danger,fontSize:13,fontFamily:"'Inter',sans-serif",borderRadius:10,transition:'all .15s'}}>
+              style={{width:'100%',display:'flex',alignItems:'center',justifyContent:(collapsed && !narrow)?'center':'flex-start',gap:10,padding:'9px 12px',background:'transparent',border:'none',cursor:'pointer',color:C.danger,fontSize:13,fontFamily:"'Inter',sans-serif",borderRadius:10,transition:'all .15s'}}>
               <span style={{fontSize:16}}>⏻</span>
-              {!collapsed && <span style={{fontWeight:600}}>Sign Out</span>}
+              {(!collapsed || narrow) && <span style={{fontWeight:600}}>Sign Out</span>}
             </button>
           </div>
         </aside>
@@ -265,16 +302,22 @@ export default function App() {
         <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden',minWidth:0}}>
 
           {/* Top bar */}
-          <header style={{background:'#141414',borderBottom:'1px solid #1E1E1E',padding:'0 28px',height:60,display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0}}>
-            <div>
-              <div style={{fontSize:16,fontWeight:800,color:C.text}}>{currentNav.ico} {currentNav.label}</div>
-              <div style={{fontSize:11,color:C.dim,marginTop:1}}>KaamReady Admin · {new Date().toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long'})}</div>
+          <header style={{background:'#141414',borderBottom:'1px solid #1E1E1E',padding: narrow ? '0 14px' : '0 28px',height:60,display:'flex',alignItems:'center',justifyContent:'space-between',gap:10,flexShrink:0}}>
+            <div style={{display:'flex',alignItems:'center',gap:12,minWidth:0}}>
+              {narrow && (
+                <button onClick={()=>setDrawer(true)} aria-label="Open menu"
+                  style={{background:'rgba(255,255,255,.06)',border:'1px solid #262626',borderRadius:10,color:C.text,fontSize:18,lineHeight:1,padding:'8px 11px',cursor:'pointer',fontFamily:'inherit',flexShrink:0}}>☰</button>
+              )}
+              <div style={{minWidth:0}}>
+                <div style={{fontSize:narrow?14:16,fontWeight:800,color:C.text,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{currentNav.ico} {currentNav.label}</div>
+                {!narrow && <div style={{fontSize:11,color:C.dim,marginTop:1}}>KaamReady Admin · {new Date().toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long'})}</div>}
+              </div>
             </div>
             <div style={{display:'flex',alignItems:'center',gap:12}}>
               {pending>0 && (
                 <button onClick={()=>setPage('payments')}
                   style={{background:'rgba(239,68,68,.1)',border:'1px solid rgba(239,68,68,.3)',borderRadius:10,padding:'7px 14px',fontSize:12,fontWeight:700,cursor:'pointer',color:C.danger,fontFamily:"'Inter',sans-serif",display:'flex',alignItems:'center',gap:6}}>
-                  <span style={{animation:'pulse 1.5s infinite'}}>●</span> {pending} pending payment{pending!==1?'s':''}
+                  <span style={{animation:'pulse 1.5s infinite'}}>●</span> {pending}{narrow ? '' : ` pending payment${pending!==1?'s':''}`}
                 </button>
               )}
               <div style={{background:'linear-gradient(135deg,#FFD700,#FFC107)',color:'#000',width:36,height:36,borderRadius:10,display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,fontWeight:900,boxShadow:'0 4px 12px rgba(255,215,0,.25)',cursor:'pointer',title:user?.email}}>
@@ -284,7 +327,7 @@ export default function App() {
           </header>
 
           {/* Page */}
-          <main style={{flex:1,overflowY:'auto',padding:24,background:'#F1F5F9',color:'#1E293B',
+          <main style={{flex:1,overflowY:'auto',padding: narrow ? 14 : 24,background:'#F1F5F9',color:'#1E293B',
             '--primary':C.primary,'--primary-h':C.primaryH,'--success':C.success,'--danger':C.danger,
             '--warning':C.warning,'--border':C.border,'--card':C.card,'--muted':C.muted,'--bg':C.bg,'--dim':C.dim}}>
             <div className="page-content" key={page}>

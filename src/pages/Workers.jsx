@@ -1,14 +1,16 @@
 import { useState, useEffect } from 'react'
 import { sb } from '../lib/supabase'
+import { WORKER_DOCS, PAN_DOC, docSubmitted, allDocsSubmitted, resolveDocUrl, KYC_LABEL, KYC_TONE } from '../lib/kycDocs'
 
 const C = { primary:'#6366F1', success:'#10B981', danger:'#EF4444', warning:'#F59E0B', border:'#E2E8F0', card:'#FFFFFF', muted:'#64748B', text:'#0F172A', bg:'#F0F4FF' }
 const INR = v => '₹' + (v||0).toLocaleString('en-IN')
 const fmt = d => d ? new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—'
 
 function KycBadge({ status }) {
-  const m = { approved:['#D1FAE5','#065F46','✅ Approved'], pending:['#FEF3C7','#92400E','⏳ Pending'], rejected:['#FEE2E2','#991B1B','✕ Rejected'] }
-  const [bg,col,lbl] = m[status] || m.pending
-  return <span style={{ background:bg, color:col, fontSize:11, fontWeight:700, padding:'3px 9px', borderRadius:20 }}>{lbl}</span>
+  const [bg, col] = KYC_TONE[status] || KYC_TONE.pending
+  return <span style={{ background:bg, color:col, fontSize:11, fontWeight:700, padding:'3px 9px', borderRadius:20, whiteSpace:'nowrap' }}>
+    {KYC_LABEL[status] || KYC_LABEL.pending}
+  </span>
 }
 
 function StatusBadge({ status }) {
@@ -43,13 +45,30 @@ export default function Workers({ user, showToast }) {
   }
 
   async function updateKYC(id, status) {
+    let reason = null
+    if (status !== 'approved') {
+      reason = window.prompt('Reason for ' + (status === 'rejected' ? 'rejecting' : 'requesting resubmission') + ' (the worker sees this):')
+      if (reason === null) return
+      if (!reason.trim()) { showToast('A reason is required', 'error'); return }
+    }
     setSaving(true)
-    await sb.from('workers').update({ kyc_status: status, aadhar_verified: status==='approved', aadhaar_verified: status==='approved' }).eq('id', id)
-    await sb.from('admin_logs').insert({ admin_id: user.id, action:'update_kyc', target_id: id, details:{ kyc_status: status } }).then(()=>{})
+    // Same audited path as the Approvals queue: it flips the verification
+    // flags, tells the worker why, and writes the admin log in one step.
+    const { error } = await sb.rpc('admin_review_worker_kyc', {
+      p_worker_id: id, p_decision: status, p_reason: reason,
+    })
+    if (error) { setSaving(false); showToast(error.message.replace(/^.*?:\s*/, ''), 'error'); return }
     await load()
     setSaving(false)
-    setSelected(s => s ? { ...s, kyc_status: status, aadhar_verified: status==='approved' } : null)
-    showToast('KYC ' + status, status==='approved' ? 'success' : 'error')
+    setSelected(s => s ? { ...s, kyc_status: status, aadhar_verified: status==='approved', kyc_rejection_reason: reason } : null)
+    showToast('Verification ' + status.replace('_',' '), status==='approved' ? 'success' : 'error')
+  }
+
+  // Documents live in the private kyc bucket; sign a fresh URL on demand.
+  async function openWorkerDoc(worker, doc) {
+    const url = await resolveDocUrl(worker, doc)
+    if (!url) { showToast('That document is not available', 'error'); return }
+    window.open(url, '_blank', 'noopener')
   }
 
   async function updateStatus(id, status) {
@@ -117,10 +136,11 @@ export default function Workers({ user, showToast }) {
             ))}
           </div>
           <div style={{ display:'flex', gap:6 }}>
-            {[['all',C.primary],['pending',C.warning],['approved',C.success],['rejected',C.danger]].map(([f,col])=>(
+            {[['all',C.primary,'All'],['pending',C.warning,'Incomplete'],['submitted','#2563EB','Awaiting review'],
+              ['approved',C.success,'Approved'],['resubmit_required','#9A3412','Resubmit'],['rejected',C.danger,'Rejected']].map(([f,col,lbl])=>(
               <button key={f} onClick={()=>setKycF(f)}
-                style={{ padding:'7px 13px', borderRadius:8, border:'none', cursor:'pointer', fontSize:12, fontWeight:600, fontFamily:'inherit', textTransform:'capitalize',
-                  background:kycF===f?col:C.bg, color:kycF===f?'#fff':C.muted }}>KYC: {f}</button>
+                style={{ padding:'7px 13px', borderRadius:8, border:'none', cursor:'pointer', fontSize:12, fontWeight:600, fontFamily:'inherit',
+                  background:kycF===f?col:C.bg, color:kycF===f?'#fff':C.muted }}>{lbl}</button>
             ))}
           </div>
           <span style={{ marginLeft:'auto', fontSize:12, color:C.muted }}>{filtered.length} results</span>
@@ -198,27 +218,58 @@ export default function Workers({ user, showToast }) {
                   </div>
                 ))}
               </div>
-              {(selected.aadhar_front_url||selected.aadhaar_front_url||selected.pan_front_url) && (
-                <div style={{ marginBottom:20 }}>
-                  <p style={{ fontWeight:700, fontSize:14, marginBottom:10 }}>KYC Documents</p>
-                  <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
-                    {[['Aadhaar Front',selected.aadhar_front_url||selected.aadhaar_front_url],['Aadhaar Back',selected.aadhar_back_url||selected.aadhaar_back_url],['PAN',selected.pan_front_url]].filter(([,u])=>u).map(([l,u])=>(
-                      <a key={l} href={u} target="_blank" rel="noreferrer"
-                        style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:6, background:C.bg, borderRadius:10, padding:10, border:'1px solid '+C.border, textDecoration:'none', color:C.text }}>
-                        <img src={u} alt={l} style={{ width:80, height:60, objectFit:'cover', borderRadius:6 }} />
-                        <span style={{ fontSize:11, fontWeight:600 }}>{l}</span>
-                      </a>
-                    ))}
+              <div style={{ marginBottom:20 }}>
+                <p style={{ fontWeight:700, fontSize:14, marginBottom:10 }}>Verification Documents</p>
+                {WORKER_DOCS.map(doc => {
+                  const ok = docSubmitted(selected, doc)
+                  return (
+                    <div key={doc.key} style={{ display:'flex', alignItems:'center', gap:10, padding:'9px 0', borderTop:'1px solid '+C.border }}>
+                      <span style={{ width:22, height:22, borderRadius:6, flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center',
+                        background: ok ? '#D1FAE5' : '#FEE2E2', color: ok ? '#065F46' : '#991B1B', fontSize:12, fontWeight:900 }}>{ok ? '✓' : '✕'}</span>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <p style={{ fontSize:13, fontWeight:600 }}>{doc.label}</p>
+                        <p style={{ fontSize:11, color: ok ? C.muted : '#991B1B' }}>{ok ? 'Submitted' : 'Not Submitted'}</p>
+                      </div>
+                      {ok && (
+                        <button onClick={()=>openWorkerDoc(selected, doc)}
+                          style={{ background:C.bg, border:'1px solid '+C.border, borderRadius:8, padding:'6px 12px', fontSize:12, fontWeight:700, cursor:'pointer', fontFamily:'inherit', color:C.primary }}>
+                          {doc.kind === 'video' ? '▶ Play' : '🔍 View'}
+                        </button>
+                      )}
+                    </div>
+                  )
+                })}
+                {selected.pan_front_url && (
+                  <div style={{ display:'flex', alignItems:'center', gap:10, padding:'9px 0', borderTop:'1px solid '+C.border }}>
+                    <span style={{ width:22, height:22, borderRadius:6, flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', background:'#E0E7FF', color:C.primary, fontSize:12, fontWeight:900 }}>i</span>
+                    <div style={{ flex:1 }}>
+                      <p style={{ fontSize:13, fontWeight:600 }}>PAN (optional)</p>
+                      <p style={{ fontSize:11, color:C.muted }}>Submitted</p>
+                    </div>
+                    <button onClick={()=>openWorkerDoc(selected, PAN_DOC)}
+                      style={{ background:C.bg, border:'1px solid '+C.border, borderRadius:8, padding:'6px 12px', fontSize:12, fontWeight:700, cursor:'pointer', fontFamily:'inherit', color:C.primary }}>🔍 View</button>
                   </div>
-                </div>
-              )}
+                )}
+                {!allDocsSubmitted(selected) && (
+                  <p style={{ fontSize:12, color:'#92400E', background:'#FEF3C7', borderRadius:9, padding:'8px 11px', marginTop:10 }}>
+                    ⚠️ Identity check incomplete — this worker has not submitted all three documents.
+                  </p>
+                )}
+                {selected.kyc_rejection_reason && (
+                  <p style={{ fontSize:12, color:'#991B1B', background:'#FEF2F2', border:'1px solid #FECACA', borderRadius:9, padding:'8px 11px', marginTop:10 }}>
+                    Last decision: {selected.kyc_rejection_reason}
+                  </p>
+                )}
+              </div>
               <div style={{ display:'flex', gap:10, flexWrap:'wrap', marginBottom: bkgs.length?20:0 }}>
-                {(selected.kyc_status||'pending')==='pending' && <>
+                {(selected.kyc_status||'pending')!=='approved' && (
                   <button onClick={()=>updateKYC(selected.id,'approved')} disabled={saving}
-                    style={{ background:C.success, color:'#fff', border:'none', borderRadius:10, padding:'10px 20px', fontWeight:700, fontSize:13, cursor:'pointer', fontFamily:'inherit' }}>✅ Approve KYC</button>
-                  <button onClick={()=>updateKYC(selected.id,'rejected')} disabled={saving}
-                    style={{ background:C.danger, color:'#fff', border:'none', borderRadius:10, padding:'10px 20px', fontWeight:700, fontSize:13, cursor:'pointer', fontFamily:'inherit' }}>✕ Reject KYC</button>
-                </>}
+                    style={{ background:C.success, color:'#fff', border:'none', borderRadius:10, padding:'10px 20px', fontWeight:700, fontSize:13, cursor:'pointer', fontFamily:'inherit' }}>✅ Approve Verification</button>
+                )}
+                <button onClick={()=>updateKYC(selected.id,'resubmit_required')} disabled={saving}
+                  style={{ background:'#fff', color:C.warning, border:'1.5px solid '+C.warning, borderRadius:10, padding:'10px 20px', fontWeight:700, fontSize:13, cursor:'pointer', fontFamily:'inherit' }}>↻ Request Resubmission</button>
+                <button onClick={()=>updateKYC(selected.id,'rejected')} disabled={saving}
+                  style={{ background:C.danger, color:'#fff', border:'none', borderRadius:10, padding:'10px 20px', fontWeight:700, fontSize:13, cursor:'pointer', fontFamily:'inherit' }}>✕ Reject</button>
                 {(selected.account_status||'active')==='active'
                   ? <button onClick={()=>updateStatus(selected.id,'suspended')} disabled={saving}
                       style={{ background:C.warning, color:'#fff', border:'none', borderRadius:10, padding:'10px 20px', fontWeight:700, fontSize:13, cursor:'pointer', fontFamily:'inherit' }}>⚠ Suspend</button>

@@ -6,3 +6,11 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans
 input, select, textarea, button { font-family: inherit; }
 a { text-decoration: none; color: inherit; }
 table { border-collapse: collapse; width: 100%; }
+
+/* Tables and wide cards keep their shape and scroll sideways on small
+   screens instead of squashing the layout. */
+img { max-width: 100%; }
+@media (max-width: 640px) {
+  table { min-width: 640px; }
+  .page-content { min-width: 0; }
+}
