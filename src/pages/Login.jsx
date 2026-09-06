@@ -66,7 +66,7 @@ export default function Login({ onLogin }) {
         <form onSubmit={handleSubmit}>
           <div style={{ marginBottom:16 }}>
             <label style={{ fontSize:13, fontWeight:600, color:'#374151', display:'block', marginBottom:6 }}>Admin Email</label>
-            <input style={inp} type="email" placeholder="admin@kaamready.in" value={email} onChange={e=>setEmail(e.target.value)} required />
+            <input style={inp} type="email" placeholder="admin@thekaamready.in" value={email} onChange={e=>setEmail(e.target.value)} required />
           </div>
           <div style={{ marginBottom:24 }}>
             <label style={{ fontSize:13, fontWeight:600, color:'#374151', display:'block', marginBottom:6 }}>Password</label>

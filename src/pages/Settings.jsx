@@ -135,7 +135,7 @@ export default function Settings({ user, showToast }) {
           </div>
           <div>
             <label style={{ fontSize:12, fontWeight:700, color:C.muted, display:'block', marginBottom:6, textTransform:'uppercase' }}>Support Email</label>
-            <input value={supportMail} onChange={e=>setSupportMail(e.target.value)} style={inp} placeholder="support@kaamready.in" />
+            <input value={supportMail} onChange={e=>setSupportMail(e.target.value)} style={inp} placeholder="thekaamready@gmail.com" />
           </div>
         </div>
       </Section>
