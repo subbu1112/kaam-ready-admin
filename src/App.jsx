@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, lazy, Suspense } from 'react'
 import { sb } from './lib/supabase'
+import AlertBell from './components/AlertBell'
 
 const Login            = lazy(() => import('./pages/Login'))
 const Dashboard        = lazy(() => import('./pages/Dashboard'))
@@ -314,6 +315,7 @@ export default function App() {
               </div>
             </div>
             <div style={{display:'flex',alignItems:'center',gap:12}}>
+              <AlertBell setPage={setPage} narrow={narrow} />
               {pending>0 && (
                 <button onClick={()=>setPage('payments')}
                   style={{background:'rgba(239,68,68,.1)',border:'1px solid rgba(239,68,68,.3)',borderRadius:10,padding:'7px 14px',fontSize:12,fontWeight:700,cursor:'pointer',color:C.danger,fontFamily:"'Inter',sans-serif",display:'flex',alignItems:'center',gap:6}}>
