@@ -114,8 +114,15 @@ export default function DeletionRequests({ showToast }) {
     const patch = { status }
     if (status === 'completed') patch.completed_at = new Date().toISOString()
     const { error } = await sb.from('deletion_requests').update(patch).eq('id', row.id)
+    if (error) { setBusy(null); showToast && showToast(error.message); return }
+    // A refusal to erase someone's data is a decision that has to be
+    // accountable, so record who made it and when.
+    await sb.from('admin_logs').insert({
+      action: status === 'completed' ? 'deletion_request_completed' : 'deletion_request_rejected',
+      target_id: row.user_id,
+      details: { request_id: row.id, role: row.role, requested_at: row.requested_at },
+    }).then(() => {}, () => {})
     setBusy(null)
-    if (error) { showToast && showToast(error.message); return }
     showToast && showToast(`Request marked ${label}`)
     load()
   }
