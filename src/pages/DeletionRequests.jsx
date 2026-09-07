@@ -68,6 +68,45 @@ export default function DeletionRequests({ showToast }) {
     setLoading(false)
   }
 
+  // Runs the database erasure, then removes the returned files through the
+  // Storage API — Supabase refuses direct deletes on storage.objects, so the
+  // RPC hands back the paths for us to clear here.
+  async function eraseAccount(row) {
+    const who = people[row.user_id]?.name || 'this account'
+    const typed = prompt(
+      `Permanently erase ${who}?\n\n` +
+      `Personal data goes for good: name, phone, email, addresses, Aadhaar and ` +
+      `bank details, uploaded documents, and the login itself.\n\n` +
+      `Bookings and payment records are kept but anonymised, so your accounts ` +
+      `and the other party's history stay intact.\n\n` +
+      `This cannot be undone. Type DELETE to confirm.`)
+    if (typed !== 'DELETE') return
+
+    setBusy(row.id)
+    const { data, error } = await sb.rpc('admin_delete_user_account', {
+      p_user_id: row.user_id, p_note: 'actioned from the admin panel',
+    })
+    if (error) { setBusy(null); showToast && showToast(error.message); return }
+
+    // clear the uploaded documents the RPC listed
+    let fileErrs = 0
+    const files = data?.files || []
+    const byBucket = {}
+    files.forEach(f => { (byBucket[f.bucket] ||= []).push(f.path) })
+    for (const [bucket, paths] of Object.entries(byBucket)) {
+      const { error: e } = await sb.storage.from(bucket).remove(paths)
+      if (e) fileErrs += paths.length
+    }
+
+    setBusy(null)
+    showToast && showToast(
+      fileErrs
+        ? `Account erased, but ${fileErrs} file(s) could not be removed — check Storage`
+        : `Account erased · ${data?.bookings_anonymised || 0} booking(s) anonymised` +
+          (files.length ? `, ${files.length} file(s) deleted` : ''))
+    load()
+  }
+
   async function setStatus(row, status) {
     const label = status === 'completed' ? 'completed' : 'rejected'
     if (!confirm(`Mark this request ${label}?\n\nThis only records your decision — it does not delete any data.`)) return
@@ -163,6 +202,8 @@ export default function DeletionRequests({ showToast }) {
 
               {open && (
                 <div style={{ display: 'flex', gap: 8 }}>
+                  <button disabled={busy === r.id} style={btn('#B91C1C', 'sm')}
+                    onClick={() => eraseAccount(r)}>Delete account</button>
                   <button disabled={busy === r.id} style={btn('#16A34A', 'sm')}
                     onClick={() => setStatus(r, 'completed')}>Mark completed</button>
                   <button disabled={busy === r.id} style={btn('#64748B', 'sm')}
