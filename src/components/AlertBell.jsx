@@ -13,10 +13,16 @@ import { sb } from '../lib/supabase'
  */
 
 const KIND = {
-  new_booking:    { ico: '≡', page: 'bookings',  tint: '#3B82F6', label: 'Booking'  },
-  payment_review: { ico: '✦', page: 'payments',  tint: '#EF4444', label: 'Payment'  },
-  new_worker:     { ico: '◈', page: 'workers',   tint: '#22C55E', label: 'Worker'   },
-  kyc_review:     { ico: '✓', page: 'approvals', tint: '#F59E0B', label: 'Approval' },
+  new_booking:       { ico: '≡', page: 'bookings',    tint: '#3B82F6', label: 'Booking'   },
+  payment_review:    { ico: '✦', page: 'payments',    tint: '#EF4444', label: 'Payment'   },
+  new_worker:        { ico: '◈', page: 'workers',     tint: '#22C55E', label: 'Worker'    },
+  kyc_review:        { ico: '✓', page: 'approvals',   tint: '#F59E0B', label: 'Approval'  },
+  booking_cancelled: { ico: '✕', page: 'bookings',    tint: '#F97316', label: 'Cancelled' },
+  dispute:           { ico: '⚑', page: 'complaints',  tint: '#DC2626', label: 'Dispute'   },
+  support_ticket:    { ico: '◎', page: 'support',     tint: '#0EA5E9', label: 'Support'   },
+  withdrawal:        { ico: '↑', page: 'withdrawals', tint: '#8B5CF6', label: 'Payout'    },
+  deletion_request:  { ico: '⌫', page: 'deletions',   tint: '#DC2626', label: 'Deletion'  },
+  worker_deleted:    { ico: '◈', page: 'workers',     tint: '#64748B', label: 'Worker'    },
 }
 const fallback = { ico: '•', page: 'dashboard', tint: '#94A3B8', label: 'Alert' }
 const kindOf = t => KIND[t] || fallback

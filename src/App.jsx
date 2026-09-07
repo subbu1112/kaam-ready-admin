@@ -21,6 +21,7 @@ const Wallets          = lazy(() => import('./pages/Wallets'))
 const Finance          = lazy(() => import('./pages/Finance'))
 const Complaints       = lazy(() => import('./pages/Complaints'))
 const Services         = lazy(() => import('./pages/Services'))
+const DeletionRequests = lazy(() => import('./pages/DeletionRequests'))
 
 const IDLE_MS = 30 * 60 * 1000
 
@@ -67,6 +68,7 @@ const NAV_GROUPS = [
     items: [
       { id:'support',     ico:'◎',  label:'Support'      },
       { id:'complaints',  ico:'⚑',  label:'Complaints'   },
+      { id:'deletions',   ico:'⌫',  label:'Deletions'    },
     ]
   },
   {
@@ -197,6 +199,7 @@ export default function App() {
     analytics:   <Reports          {...ctx}/>,
     reports:     <Reports          {...ctx}/>,
     logs:        <Logs             {...ctx}/>,
+    deletions:   <DeletionRequests {...ctx}/>,
     settings:    <Settings         {...ctx}/>,
   }
 
